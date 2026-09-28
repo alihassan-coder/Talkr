@@ -1,13 +1,50 @@
 {
   "compilerOptions": {
-    "extends": "@talkr/config/tsconfig.base.json",
-    "plugins": [{ "name": "next" }],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "preserve",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@talkr/ui/*": ["../../packages/ui/src/*"],
-      "@talkr/model-catalog/*": ["../../packages/model-catalog/*"],
-      "@talkr/config/*": ["../../packages/config/*"]
-    }
+      "@talkr/ui/*": [
+        "../../packages/ui/src/*"
+      ],
+      "@talkr/model-catalog/*": [
+        "../../packages/model-catalog/*"
+      ],
+      "@talkr/config/*": [
+        "../../packages/config/*"
+      ]
+    },
+    "allowJs": true,
+    "incremental": true
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
