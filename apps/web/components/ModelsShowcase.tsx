@@ -1,8 +1,8 @@
-import { FileAudio, Mic, Globe, BadgeCheck } from 'lucide-react'
+import { FileAudio, Mic, Globe, BadgeCheck, Volume2 } from 'lucide-react'
 import { Card, Badge } from '@talkr/ui'
-import * as catalog from '@talkr/model-catalog/catalog.json'
+import catalog from '@talkr/model-catalog/catalog.json'
 
-const models = (catalog as any).default?.models || (catalog as any).models || []
+const models = catalog.models || []
 
 const sttModels = models.filter((m: any) => m.kind === 'stt')
 const ttsModels = models.filter((m: any) => m.kind === 'tts')

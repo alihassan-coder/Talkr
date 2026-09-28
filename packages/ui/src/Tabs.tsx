@@ -1,3 +1,5 @@
+"use client"
+
 import { createContext, useContext, useState, ReactNode, HTMLAttributes } from 'react'
 
 interface TabsContextValue {

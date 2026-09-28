@@ -1,15 +1,19 @@
+"use client"
+
 import Link from 'next/link'
 import { Download, Github, Menu, X } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@talkr/ui/Button'
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener('scroll', () => setScrolled(window.scrollY > 20))
-  }
+  useEffect(() => {
+    const handleScroll = () => setScrolled(window.scrollY > 20)
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   const navLinks = [
     { href: '#features', label: 'Features' },

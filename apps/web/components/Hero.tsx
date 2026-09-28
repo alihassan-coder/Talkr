@@ -1,3 +1,5 @@
+"use client"
+
 import { Download, ArrowRight, CheckCircle, Github } from 'lucide-react'
 import { Button } from '@talkr/ui/Button'
 import { useEffect, useState } from 'react'
