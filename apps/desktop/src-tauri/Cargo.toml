@@ -1,0 +1,40 @@
+[package]
+name = "talkr"
+version = "0.1.0"
+description = "Free, private, offline speech tools"
+authors = ["Talkr Contributors"]
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [
+  "dialog",
+  "opener",
+  "log",
+  "fs"
+] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-opener = "2.0"
+tauri-plugin-log = { version = "2.0", features = ["fern"] }
+tauri-plugin-fs = "2.0"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+dirs = "5.0"
+sysinfo = "0.30"
+tokio = { version = "1.38", features = ["full"] }
+rusqlite = { version = "0.31", features = ["bundled", "extra_check"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
+sha2 = "0.10"
+tar = "0.4"
+bzip2 = "0.4"
+flume = "0.11"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

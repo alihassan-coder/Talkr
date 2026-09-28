@@ -1,0 +1,13 @@
+{
+  "identifier": "app.talkr",
+  "description": "Talkr - Free, private, offline speech tools",
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "opener:default",
+    "log:default",
+    "fs:default",
+    "fs:allow-app-data",
+    "fs:allow-home-dir"
+  ]
+}

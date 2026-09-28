@@ -1,0 +1,258 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "whisper-tiny-en",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Tiny (English)",
+      "description": "Fastest English transcription, lower accuracy. Good for quick drafts.",
+      "languages": ["en"],
+      "sizeBytes": 76957065,
+      "ramRecommendedBytes": 500000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["fast", "english"]
+    },
+    {
+      "id": "whisper-base-en",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Base (English)",
+      "description": "Fast and accurate English transcription. Good default for most users.",
+      "languages": ["en"],
+      "sizeBytes": 147951465,
+      "ramRecommendedBytes": 1000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["recommended", "fast", "english"]
+    },
+    {
+      "id": "whisper-small-en",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Small (English)",
+      "description": "More accurate English transcription, slower. Good for important recordings.",
+      "languages": ["en"],
+      "sizeBytes": 488153133,
+      "ramRecommendedBytes": 2000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["accurate", "english"]
+    },
+    {
+      "id": "whisper-base",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Base (Multilingual)",
+      "description": "Multilingual transcription, 50+ languages. Good balance of speed and coverage.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 147951465,
+      "ramRecommendedBytes": 1000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["multilingual", "recommended"]
+    },
+    {
+      "id": "whisper-small",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Small (Multilingual)",
+      "description": "More accurate multilingual transcription. Good for non-English content.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 488153133,
+      "ramRecommendedBytes": 2000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["multilingual", "accurate"]
+    },
+    {
+      "id": "whisper-medium",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Medium (Multilingual)",
+      "description": "High accuracy multilingual transcription. Requires GPU or lots of RAM.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 1547890245,
+      "ramRecommendedBytes": 5000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["multilingual", "accurate", "gpu-recommended"]
+    },
+    {
+      "id": "whisper-large-v3-turbo",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Large v3 Turbo (Multilingual)",
+      "description": "Best quality multilingual transcription. Requires GPU and 8GB+ VRAM.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 1628996489,
+      "ramRecommendedBytes": 8000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+          "sha256": "PLACEHOLDER_SHA256"
+        }
+      ],
+      "tags": ["multilingual", "best-quality", "gpu-required"]
+    },
+    {
+      "id": "kokoro-multi-lang-v1_0",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Kokoro Multi-language",
+      "description": "High-quality multi-voice, multi-language TTS. Apache-2.0 licensed.",
+      "languages": ["en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh"],
+      "sizeBytes": 335544320,
+      "ramRecommendedBytes": 1000000000,
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/k2-fsa/sherpa-onnx",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["recommended", "multi-voice", "multilingual"]
+    },
+    {
+      "id": "kokoro-en-v0_19",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Kokoro English",
+      "description": "Lightweight English-only Kokoro model. Fast and natural.",
+      "languages": ["en"],
+      "sizeBytes": 83886080,
+      "ramRecommendedBytes": 500000000,
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/k2-fsa/sherpa-onnx",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["fast", "english", "lightweight"]
+    },
+    {
+      "id": "piper-en_US-lessac-medium",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Piper English (Lessac, Medium)",
+      "description": "Fast, lightweight English voice. Includes espeak-ng-data (GPL).",
+      "languages": ["en"],
+      "sizeBytes": 52428800,
+      "ramRecommendedBytes": 300000000,
+      "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
+      "homepage": "https://github.com/rhasspy/piper",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["fast", "english", "lightweight", "piper"]
+    },
+    {
+      "id": "piper-en_GB-alan-medium",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Piper English UK (Alan, Medium)",
+      "description": "British English voice. Includes espeak-ng-data (GPL).",
+      "languages": ["en-GB"],
+      "sizeBytes": 52428800,
+      "ramRecommendedBytes": 300000000,
+      "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
+      "homepage": "https://github.com/rhasspy/piper",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alan-medium.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["fast", "british-english", "lightweight", "piper"]
+    },
+    {
+      "id": "piper-de_DE-thorsten-medium",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Piper German (Thorsten, Medium)",
+      "description": "German voice. Includes espeak-ng-data (GPL).",
+      "languages": ["de"],
+      "sizeBytes": 52428800,
+      "ramRecommendedBytes": 300000000,
+      "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
+      "homepage": "https://github.com/rhasspy/piper",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-de_DE-thorsten-medium.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["fast", "german", "lightweight", "piper"]
+    },
+    {
+      "id": "piper-fr_FR-gilles-medium",
+      "kind": "tts",
+      "engine": "sherpa-onnx",
+      "name": "Piper French (Gilles, Medium)",
+      "description": "French voice. Includes espeak-ng-data (GPL).",
+      "languages": ["fr"],
+      "sizeBytes": 52428800,
+      "ramRecommendedBytes": 300000000,
+      "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
+      "homepage": "https://github.com/rhasspy/piper",
+      "files": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-gilles-medium.tar.bz2",
+          "sha256": "PLACEHOLDER_SHA256",
+          "archive": "tar.bz2"
+        }
+      ],
+      "tags": ["fast", "french", "lightweight", "piper"]
+    }
+  ]
+}
