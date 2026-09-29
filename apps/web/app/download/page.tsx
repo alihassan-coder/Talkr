@@ -22,7 +22,7 @@ const requirements = [
   { term: 'macOS', detail: '11 Big Sur or later. Apple Silicon for GPU acceleration' },
   { term: 'Linux', detail: 'glibc 2.31 or later. NVIDIA (CUDA 12+) or any Vulkan 1.2 GPU for acceleration' },
   { term: 'Memory', detail: '4 GB for the small models, 8 GB or more for Whisper Medium and Large' },
-  { term: 'Disk', detail: 'About 120 MB for the app, plus 50 MB to 1.6 GB per model' },
+  { term: 'Disk', detail: 'About 5 to 15 MB for the app, plus 50 MB to 1.6 GB per model' },
 ]
 
 export default function DownloadPage() {
