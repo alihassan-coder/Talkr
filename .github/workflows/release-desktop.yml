@@ -74,6 +74,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # sherpa-rs-sys's build script copies the sherpa-onnx DLLs into target/release, but a
+      # restored rust-cache skips that script, and nothing orders it before tauri-build's
+      # resource check (tauri.windows.conf.json). Rerun it on its own first.
+      - name: Stage sherpa-onnx DLLs (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo clean --release -p sherpa-rs-sys
+          cargo build --release -p sherpa-rs-sys
+          ls -la target/release/*.dll
+
       - name: Build and upload installers
         uses: tauri-apps/tauri-action@v0
         env:
