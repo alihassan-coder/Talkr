@@ -26,15 +26,21 @@ jobs:
           - name: Windows x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            # Native build (no --target) so tauri.windows.conf.json finds the DLLs in target/release.
+            args: ''
           - name: macOS Apple Silicon
             os: macos-latest
             target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
           - name: macOS Intel
             os: macos-latest
             target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
           - name: Linux x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            # Native build (no --target) so tauri.linux.conf.json finds the .so files in target/release.
+            args: ''
 
     steps:
       - uses: actions/checkout@v4
@@ -89,18 +95,19 @@ jobs:
             Checksums are listed in `SHA256SUMS-*.txt`.
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: ${{ matrix.args }}
 
       - name: Attach SHA-256 checksums
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+          # target/<triple>/release/bundle with --target, target/release/bundle without.
+          cd apps/desktop/src-tauri/target
           out="SHA256SUMS-${{ matrix.target }}.txt"
-          find . -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+          find . -path '*release/bundle/*' -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
             | while read -r f; do
                 if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi
-              done | sed 's#  \./[^/]*/#  #' > "$out"
+              done | sed 's#  .*/#  #' > "$out"
           cat "$out" >> "$GITHUB_STEP_SUMMARY"
           gh release upload "${{ github.ref_name }}" "$out" --clobber --repo "${{ github.repository }}"

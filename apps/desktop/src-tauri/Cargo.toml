@@ -47,10 +47,19 @@ symphonia = { version = "0.5", features = ["all"] }
 rubato = "0.15"
 hound = "3.5"
 
-# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx links its prebuilt
-# libs statically so the installers need no extra .dll/.so/.dylib files next to the app)
+# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx uses prebuilt libs)
 whisper-rs = "0.16"
+
+# macOS links sherpa-onnx statically, so the .app needs no extra .dylib files.
+[target.'cfg(target_os = "macos")'.dependencies]
 sherpa-rs = { version = "0.6", features = ["static"] }
+
+# Windows and Linux use sherpa's shared libs (its static archives don't link there: /MT vs
+# /MD on Windows, link order on Linux). The installers ship them: tauri.windows.conf.json puts
+# the DLLs next to talkr.exe, and tauri.linux.conf.json puts the .so files in /usr/lib/talkr,
+# where build.rs points the binary's rpath.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sherpa-rs = "0.6"
 
 [features]
 # Opt-in GPU backends for whisper.cpp (require the matching SDK at build time).
