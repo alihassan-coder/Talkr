@@ -8,6 +8,8 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-theme",
+    "core:window:allow-set-background-color",
+    "core:webview:allow-set-webview-background-color",
     "dialog:default",
     "opener:default",
     "log:default",

@@ -79,10 +79,10 @@ export function AudioPlayer({
 
   return (
     <Card className="animate-rise overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-fg/[0.08] px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
         <div className="min-w-0">
           <p className="truncate text-[15px] font-medium tracking-[-0.01em]">{title}</p>
-          <p className="mt-0.5 font-mono text-[11px] text-fg/40">{meta}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-subtle">{meta}</p>
         </div>
         <div className="flex items-center gap-2">{actions}</div>
       </div>
@@ -98,7 +98,7 @@ export function AudioPlayer({
           type="button"
           onClick={toggle}
           aria-label={playing ? 'Pause' : 'Play'}
-          className="grid size-11 shrink-0 place-items-center rounded-full bg-fg text-bg transition-transform duration-200 ease-out-quint hover:scale-[1.04] active:scale-95"
+          className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint hover:scale-[1.04] active:scale-95"
         >
           {playing ? (
             <Pause className="size-4" fill="currentColor" strokeWidth={0} />
@@ -109,23 +109,23 @@ export function AudioPlayer({
 
         <div className="min-w-0 flex-1">
           <div className="relative h-16 cursor-pointer" onClick={onWaveClick}>
-            <Waveform bars={bars} className="absolute inset-0 size-full text-fg/20" />
+            <Waveform bars={bars} className="absolute inset-0 size-full text-line-strong" />
             {/* clip-path keeps both layers aligned bar for bar */}
             <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - ratio * 100}% 0 0)` }}>
-              <Waveform bars={bars} className="size-full text-fg" />
+              <Waveform bars={bars} className="size-full text-accent" />
             </div>
             {time > 0 ? (
-              <span className="pointer-events-none absolute -inset-y-1.5 w-px bg-fg" style={{ left: `${ratio * 100}%` }} />
+              <span className="pointer-events-none absolute -inset-y-1.5 w-px bg-accent" style={{ left: `${ratio * 100}%` }} />
             ) : null}
           </div>
-          <div className="mt-2 flex justify-between font-mono text-[10.5px] tabular-nums text-fg/40">
+          <div className="mt-2 flex justify-between font-mono text-[10.5px] tabular-nums text-subtle">
             <span>{formatDuration(time * 1000)}</span>
             <span>{formatDuration(duration * 1000)}</span>
           </div>
         </div>
       </div>
 
-      <div className="border-t border-fg/[0.08] px-6 py-3 font-mono text-[11px] text-fg/40">{footer}</div>
+      <div className="border-t border-line px-6 py-3 font-mono text-[11px] text-subtle">{footer}</div>
 
       <audio
         ref={audioRef}

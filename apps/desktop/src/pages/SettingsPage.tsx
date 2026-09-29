@@ -230,7 +230,7 @@ export function SettingsPage() {
         <PageHeader title="Settings" />
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-2xl border border-fg/10 bg-fg/[0.02]" />
+            <div key={i} className="h-28 animate-pulse rounded-2xl border border-line bg-surface" />
           ))}
         </div>
       </div>
@@ -253,7 +253,7 @@ export function SettingsPage() {
           <span
             aria-live="polite"
             className={cx(
-              'font-mono text-[11px] text-fg/40 transition-opacity duration-300',
+              'font-mono text-[11px] text-subtle transition-opacity duration-300',
               status === 'idle' ? 'opacity-0' : 'opacity-100',
             )}
           >
@@ -263,7 +263,7 @@ export function SettingsPage() {
       />
 
       {!tauri ? (
-        <p className="-mt-6 font-mono text-[11px] text-fg/35">Preview. Changes are not saved outside the desktop app.</p>
+        <p className="-mt-6 font-mono text-[11px] text-subtle">Preview. Changes are not saved outside the desktop app.</p>
       ) : null}
 
       <AppearanceSection />
@@ -325,7 +325,7 @@ export function SettingsPage() {
             onChange={(e) => saveRate(Number(e.target.value))}
             className="w-32"
           />
-          <span className="w-10 text-right font-mono text-[12px] tabular-nums text-fg/60">
+          <span className="w-10 text-right font-mono text-[12px] tabular-nums text-muted">
             {settings.speechRate.toFixed(2)}x
           </span>
         </Row>
@@ -402,17 +402,17 @@ export function SettingsPage() {
       </Section>
 
       <Section title="Storage">
-        <div className="space-y-4 border-b border-fg/[0.08] px-5 py-5">
+        <div className="space-y-4 border-b border-line px-5 py-5">
           <div className="flex items-baseline justify-between gap-4">
             <p className="text-[13.5px] font-medium">Disk usage</p>
-            <p className="font-mono text-[12px] tabular-nums text-fg/60">{usage ? formatBytes(usage.totalBytes) : '—'}</p>
+            <p className="font-mono text-[12px] tabular-nums text-muted">{usage ? formatBytes(usage.totalBytes) : '—'}</p>
           </div>
           <StorageBar usage={usage} />
         </div>
         <Row
           label="Data folder"
           description={
-            <span data-selectable className="break-all font-mono text-[12px] text-fg/45">
+            <span data-selectable className="break-all font-mono text-[12px] text-subtle">
               {paths?.home ?? '~/.talkr'}
             </span>
           }
@@ -444,13 +444,13 @@ export function SettingsPage() {
 
       <Section title="About">
         <Row label="Talkr" description="Free and open source under MIT.">
-          <span className="font-mono text-[12px] text-fg/50">v{VERSION}</span>
+          <span className="font-mono text-[12px] text-subtle">v{VERSION}</span>
         </Row>
         {hardware ? (
           <Row
             label="This computer"
             description={
-              <span className="font-mono text-[12px] text-fg/45">
+              <span className="font-mono text-[12px] text-subtle">
                 {[
                   hardware.cpuName,
                   `${hardware.cpuCores} cores`,
@@ -460,7 +460,7 @@ export function SettingsPage() {
               </span>
             }
           >
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-fg/50">
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">
               {backendNames[hardware.recommendedBackend]}
             </span>
           </Row>
@@ -487,7 +487,7 @@ function ModelSelect({
   onChange: (id: string) => void
 }) {
   if (models.length === 0 && !value) {
-    return <span className="font-mono text-[12px] text-fg/40">No models installed</span>
+    return <span className="font-mono text-[12px] text-subtle">No models installed</span>
   }
   return (
     <Select
@@ -506,9 +506,9 @@ function ModelSelect({
 }
 
 const storageParts = [
-  { key: 'modelsBytes', label: 'Models', tone: 'bg-fg' },
-  { key: 'audioBytes', label: 'Audio', tone: 'bg-fg/50' },
-  { key: 'dbBytes', label: 'History database', tone: 'bg-fg/25' },
+  { key: 'modelsBytes', label: 'Models', tone: 'bg-accent' },
+  { key: 'audioBytes', label: 'Audio', tone: 'bg-accent/55' },
+  { key: 'dbBytes', label: 'History database', tone: 'bg-accent/25' },
 ] as const
 
 function StorageBar({ usage }: { usage: StorageUsage | null }) {
@@ -530,10 +530,10 @@ function StorageBar({ usage }: { usage: StorageUsage | null }) {
       </div>
       <ul className="flex flex-wrap gap-x-6 gap-y-1.5">
         {storageParts.map((p) => (
-          <li key={p.key} className="flex items-center gap-2 text-[12.5px] text-fg/55">
+          <li key={p.key} className="flex items-center gap-2 text-[12.5px] text-muted">
             <span className={cx('size-2 rounded-full', p.tone)} />
             {p.label}
-            <span className="font-mono text-[11.5px] tabular-nums text-fg/40">{usage ? formatBytes(usage[p.key]) : '—'}</span>
+            <span className="font-mono text-[11.5px] tabular-nums text-subtle">{usage ? formatBytes(usage[p.key]) : '—'}</span>
           </li>
         ))}
       </ul>

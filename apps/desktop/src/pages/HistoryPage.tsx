@@ -139,8 +139,8 @@ export function HistoryPage() {
       <PageHeader title="History" description="Everything you have made, searchable. Stored only on this computer." />
 
       <div className="flex flex-wrap items-center gap-2.5">
-        <label className="group relative flex h-9 min-w-[14rem] flex-1 items-center rounded-full border border-fg/12 pl-9 pr-3 transition-colors focus-within:border-fg/30 hover:border-fg/20">
-          <Search className="pointer-events-none absolute left-3.5 size-3.5 text-fg/40" strokeWidth={2} />
+        <label className="group relative flex h-9 min-w-[14rem] flex-1 items-center rounded-full border border-line bg-surface pl-9 pr-3 transition-colors hover:border-line-strong focus-within:border-accent">
+          <Search className="pointer-events-none absolute left-3.5 size-3.5 text-subtle" strokeWidth={2} />
           <input
             ref={searchRef}
             type="search"
@@ -149,7 +149,7 @@ export function HistoryPage() {
             placeholder="Search history"
             aria-label="Search history"
             spellCheck={false}
-            className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg/35 [&::-webkit-search-cancel-button]:hidden"
+            className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-subtle [&::-webkit-search-cancel-button]:hidden"
           />
           {input ? (
             <button
@@ -160,7 +160,7 @@ export function HistoryPage() {
                 setQuery('')
                 searchRef.current?.focus()
               }}
-              className="grid size-5 place-items-center rounded-full text-fg/45 hover:bg-fg/[0.08] hover:text-fg"
+              className="grid size-5 place-items-center rounded-full text-subtle hover:bg-fg/[0.08] hover:text-fg"
             >
               <X className="size-3" strokeWidth={2.25} />
             </button>
@@ -184,11 +184,11 @@ export function HistoryPage() {
       </div>
 
       {!isTauri() ? (
-        <p className="-mt-3 font-mono text-[11px] text-fg/35">Preview data. Open the desktop app to see your history.</p>
+        <p className="-mt-3 font-mono text-[11px] text-subtle">Preview data. Open the desktop app to see your history.</p>
       ) : null}
 
       {loading ? (
-        <div className="grid place-items-center py-20 text-fg/40">
+        <div className="grid place-items-center py-20 text-subtle">
           <LoaderCircle className="size-4 animate-spin" strokeWidth={2} />
         </div>
       ) : items.length === 0 ? (
@@ -217,7 +217,7 @@ export function HistoryPage() {
               <section key={group.key} className="space-y-2.5">
                 <Kicker className="px-1">{group.label}</Kicker>
                 <Card>
-                  <ul className="divide-y divide-fg/[0.08]">
+                  <ul className="divide-y divide-line">
                     {group.items.map((item) => (
                       <HistoryRow
                         key={item.id}
@@ -287,7 +287,7 @@ function HistoryRow({
         <span
           className={cx(
             'grid size-8 shrink-0 place-items-center rounded-lg border transition-colors',
-            selected ? 'border-fg/25 text-fg' : 'border-fg/10 text-fg/55',
+            selected ? 'border-line-strong text-fg' : 'border-line text-muted',
           )}
         >
           {item.kind === 'tts' ? <Volume2 className="size-3.5" strokeWidth={2} /> : <Mic className="size-3.5" strokeWidth={2} />}
@@ -295,9 +295,9 @@ function HistoryRow({
         <span className="min-w-0 flex-1">
           <span className="line-clamp-1 text-[13.5px] font-medium tracking-[-0.005em] text-fg">{item.title}</span>
           {snippet && snippet !== item.title ? (
-            <span className="line-clamp-1 text-[13px] text-fg/50">{snippet}</span>
+            <span className="line-clamp-1 text-[13px] text-muted">{snippet}</span>
           ) : null}
-          <span className="mt-0.5 line-clamp-1 font-mono text-[11px] text-fg/35">{meta.join(' · ')}</span>
+          <span className="mt-0.5 line-clamp-1 font-mono text-[11px] text-subtle">{meta.join(' · ')}</span>
         </span>
       </button>
       <IconButton

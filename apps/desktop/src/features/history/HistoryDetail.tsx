@@ -97,13 +97,13 @@ export function HistoryDetail({
 
   return (
     <Card className="animate-rise overflow-hidden">
-      <div className="flex items-start gap-3 border-b border-fg/[0.08] px-4 py-3.5">
-        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-fg/10 text-fg/60">
+      <div className="flex items-start gap-3 border-b border-line px-4 py-3.5">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-line text-muted">
           {item.kind === 'tts' ? <Volume2 className="size-3.5" strokeWidth={2} /> : <Mic className="size-3.5" strokeWidth={2} />}
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="line-clamp-2 text-[14px] font-medium tracking-[-0.01em]">{item.title}</h2>
-          <p className="mt-0.5 font-mono text-[11px] text-fg/40">
+          <p className="mt-0.5 font-mono text-[11px] text-subtle">
             {created.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} ·{' '}
             {created.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
           </p>
@@ -127,31 +127,31 @@ export function HistoryDetail({
           <div data-selectable className="max-h-80 space-y-2.5 overflow-y-auto pr-1 text-[13px] leading-relaxed">
             {segments.map((seg, i) => (
               <p key={i} className="grid grid-cols-[3.25rem_1fr] gap-2">
-                <span className="pt-px font-mono text-[11px] tabular-nums text-fg/35">{formatClock(seg.startMs)}</span>
-                <span className="text-fg/80">{seg.text.trim()}</span>
+                <span className="pt-px font-mono text-[11px] tabular-nums text-subtle">{formatClock(seg.startMs)}</span>
+                <span className="text-fg">{seg.text.trim()}</span>
               </p>
             ))}
           </div>
         ) : (
           <p
             data-selectable
-            className="max-h-80 overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-relaxed text-fg/80"
+            className="max-h-80 overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-relaxed text-fg"
           >
             {item.text}
           </p>
         )}
 
-        <p className="flex flex-wrap gap-x-2 gap-y-1 font-mono text-[11px] text-fg/40">
+        <p className="flex flex-wrap gap-x-2 gap-y-1 font-mono text-[11px] text-subtle">
           {meta.map((m, i) => (
             <span key={i}>
-              {i > 0 ? <span className="mr-2 text-fg/20">/</span> : null}
+              {i > 0 ? <span className="mr-2 text-line-strong">/</span> : null}
               {m}
             </span>
           ))}
         </p>
       </div>
 
-      <div className="space-y-3 border-t border-fg/[0.08] px-4 py-3.5">
+      <div className="space-y-3 border-t border-line px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
           <Kicker className="mr-1">Export</Kicker>
           {formats.map((f) => (
@@ -181,7 +181,7 @@ export function HistoryDetail({
           <Button
             size="sm"
             variant={confirmDelete ? 'primary' : 'ghost'}
-            className={cx('ml-auto', !confirmDelete && 'text-fg/50')}
+            className={cx('ml-auto', !confirmDelete && 'text-subtle')}
             icon={<Trash2 className="size-3.5" strokeWidth={2} />}
             onClick={() => void remove()}
           >

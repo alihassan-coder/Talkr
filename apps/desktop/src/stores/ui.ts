@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_THEME, isThemeId, type ThemeId } from '@/lib/themes'
+import { DEFAULT_THEME, migrateThemeId, type ThemeId } from '@/lib/themes'
 
 export type ColorMode = 'system' | 'light' | 'dark'
 
@@ -39,7 +39,7 @@ export const useUi = create<UiState>()(
           ...current,
           sidebarCollapsed: p.sidebarCollapsed === true,
           mode: isMode(p.mode) ? p.mode : current.mode,
-          theme: isThemeId(p.theme) ? p.theme : current.theme,
+          theme: migrateThemeId(p.theme) ?? current.theme,
         }
       },
     },

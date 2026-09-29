@@ -3,14 +3,29 @@
 @import "@fontsource-variable/geist-mono";
 
 /*
-  Same two colours as the website: `bg` and `fg`. The default palette is off,
-  so every tint is an opacity of one of them. Fonts are bundled, not fetched:
-  the app has to look right with the network unplugged.
+  Semantic colour tokens. Each theme sets five base colours per mode (bg,
+  surface, fg, accent, on-accent); everything else is mixed from them here, once,
+  so a new theme is five lines. The default palette is off, so nothing outside
+  these tokens can sneak in. Fonts are bundled, not fetched: the app has to look
+  right with the network unplugged.
+
+  Keep the palettes in sync with src/lib/themes.ts (picker previews) and the
+  inline script in index.html (splash).
 */
 @theme {
   --color-*: initial;
+  /* Base colours: Graphite dark. Overridden per theme and mode below. */
   --color-bg: #0b0b0c;
+  --color-surface: #141416;
   --color-fg: #ededea;
+  --color-accent: #ededea;
+  --color-on-accent: #0b0b0c;
+  /* Derived. The percentages are per mode (see :root rules in the base layer). */
+  --color-panel: color-mix(in oklab, var(--color-fg) var(--mix-panel), var(--color-bg));
+  --color-muted: color-mix(in oklab, var(--color-fg) var(--mix-muted), var(--color-bg));
+  --color-subtle: color-mix(in oklab, var(--color-fg) var(--mix-subtle), var(--color-bg));
+  --color-line: color-mix(in oklab, var(--color-fg) var(--mix-line), transparent);
+  --color-line-strong: color-mix(in oklab, var(--color-fg) var(--mix-line-strong), transparent);
 
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -46,33 +61,58 @@
 }
 
 /*
-  Themes swap the same two variables, so every `fg/…` and `bg/…` utility
-  follows along. index.html sets both attributes before first paint.
-  The defaults above are Graphite dark; the bare light rule is Graphite light
-  and also the fallback for an unknown theme.
+  index.html sets `data-theme` and `data-mode` before first paint. The bare
+  :root rule is dark; the bare light rule is Graphite light and also the
+  fallback for an unknown theme. Mix percentages were picked for contrast:
+  muted >= 4.5:1 and subtle >= 3:1 on both bg and surface in every theme.
 */
 @layer base {
   :root {
     color-scheme: dark;
+    --mix-panel: 2.5%;
+    --mix-muted: 62%;
+    --mix-subtle: 46%;
+    --mix-line: 10%;
+    --mix-line-strong: 20%;
+    --shadow-card: none;
     --shadow-pop: 0 18px 48px -14px rgb(0 0 0 / 0.65), 0 2px 8px -2px rgb(0 0 0 / 0.35);
+    /* Switch thumb while off: light on the dark track here, white with a shadow in light mode. */
+    --knob-off: color-mix(in oklab, var(--color-fg) 72%, var(--color-bg));
+    --shadow-knob: 0 1px 2px rgb(0 0 0 / 0.35);
   }
   :root[data-mode="light"] {
     color-scheme: light;
-    --color-bg: #f5f4f0;
+    --mix-panel: 3.5%;
+    --mix-muted: 66%;
+    --mix-subtle: 50%;
+    --mix-line: 12%;
+    --mix-line-strong: 22%;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.02);
+    --shadow-pop: 0 16px 40px -14px rgb(0 0 0 / 0.18), 0 2px 6px -2px rgb(0 0 0 / 0.08);
+    --knob-off: var(--color-surface);
+    --shadow-knob: 0 1px 2px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+    --color-bg: #f3f3f1;
+    --color-surface: #ffffff;
     --color-fg: #121212;
-    --shadow-pop: 0 18px 44px -16px rgb(0 0 0 / 0.2), 0 2px 8px -3px rgb(0 0 0 / 0.1);
+    --color-accent: #121212;
+    --color-on-accent: #ffffff;
   }
 
-  :root[data-theme="midnight"][data-mode="dark"] { --color-bg: #0a0e17; --color-fg: #e3e9f5; }
-  :root[data-theme="midnight"][data-mode="light"] { --color-bg: #eef2f9; --color-fg: #0e1a33; }
-  :root[data-theme="forest"][data-mode="dark"] { --color-bg: #0a110d; --color-fg: #e2ece4; }
-  :root[data-theme="forest"][data-mode="light"] { --color-bg: #eef4ef; --color-fg: #10231a; }
-  :root[data-theme="ember"][data-mode="dark"] { --color-bg: #120c09; --color-fg: #f3e5dc; }
-  :root[data-theme="ember"][data-mode="light"] { --color-bg: #f8efe8; --color-fg: #2d150b; }
-  :root[data-theme="plum"][data-mode="dark"] { --color-bg: #100b13; --color-fg: #ece3f3; }
-  :root[data-theme="plum"][data-mode="light"] { --color-bg: #f5eff8; --color-fg: #24142f; }
-  :root[data-theme="sand"][data-mode="dark"] { --color-bg: #12100b; --color-fg: #efe5d1; }
-  :root[data-theme="sand"][data-mode="light"] { --color-bg: #f6f0e3; --color-fg: #2a2316; }
+  /* bg / surface / fg / accent / on-accent. Graphite dark is the @theme default. */
+  :root[data-theme="nightfall"][data-mode="dark"] { --color-bg: #0a0c15; --color-surface: #121526; --color-fg: #e4e7f7; --color-accent: #8e9cff; --color-on-accent: #0a0c15; }
+  :root[data-theme="nightfall"][data-mode="light"] { --color-bg: #f1f3fb; --color-surface: #ffffff; --color-fg: #121833; --color-accent: #4353d6; --color-on-accent: #ffffff; }
+  :root[data-theme="forest"][data-mode="dark"] { --color-bg: #09100c; --color-surface: #101a14; --color-fg: #e1ece4; --color-accent: #5dd39e; --color-on-accent: #06140d; }
+  :root[data-theme="forest"][data-mode="light"] { --color-bg: #eff4f0; --color-surface: #ffffff; --color-fg: #0f2419; --color-accent: #187a4e; --color-on-accent: #ffffff; }
+  :root[data-theme="ember"][data-mode="dark"] { --color-bg: #110c0a; --color-surface: #1b1411; --color-fg: #f4e9e1; --color-accent: #ff8d52; --color-on-accent: #1a0d06; }
+  :root[data-theme="ember"][data-mode="light"] { --color-bg: #faf5f1; --color-surface: #ffffff; --color-fg: #2a170d; --color-accent: #b8480f; --color-on-accent: #ffffff; }
+  :root[data-theme="orchid"][data-mode="dark"] { --color-bg: #0f0b14; --color-surface: #19121f; --color-fg: #eee6f6; --color-accent: #d08cff; --color-on-accent: #160a20; }
+  :root[data-theme="orchid"][data-mode="light"] { --color-bg: #f7f3fa; --color-surface: #ffffff; --color-fg: #24142f; --color-accent: #9440cc; --color-on-accent: #ffffff; }
+  :root[data-theme="dune"][data-mode="dark"] { --color-bg: #12100b; --color-surface: #1c1912; --color-fg: #f0e7d4; --color-accent: #e5b95f; --color-on-accent: #1a1406; }
+  :root[data-theme="dune"][data-mode="light"] { --color-bg: #f7f2e8; --color-surface: #fffdf8; --color-fg: #2b2417; --color-accent: #8a600c; --color-on-accent: #ffffff; }
+  :root[data-theme="ocean"][data-mode="dark"] { --color-bg: #081114; --color-surface: #0f1b1f; --color-fg: #e0eef1; --color-accent: #45c9d8; --color-on-accent: #041214; }
+  :root[data-theme="ocean"][data-mode="light"] { --color-bg: #eef6f7; --color-surface: #ffffff; --color-fg: #0d2429; --color-accent: #0b7383; --color-on-accent: #ffffff; }
+  :root[data-theme="rose"][data-mode="dark"] { --color-bg: #130b0e; --color-surface: #1d1216; --color-fg: #f6e6eb; --color-accent: #ff7d9c; --color-on-accent: #1f0910; }
+  :root[data-theme="rose"][data-mode="light"] { --color-bg: #fbf3f5; --color-surface: #ffffff; --color-fg: #2d121a; --color-accent: #bf2f58; --color-on-accent: #ffffff; }
 
   html,
   body,
@@ -105,12 +145,12 @@
   }
 
   ::selection {
-    background-color: var(--color-fg);
-    color: var(--color-bg);
+    background-color: var(--color-accent);
+    color: var(--color-on-accent);
   }
 
   :focus-visible {
-    outline: 1.5px solid var(--color-fg);
+    outline: 1.5px solid var(--color-accent);
     outline-offset: 2px;
   }
 
@@ -138,7 +178,7 @@
   }
 
   input[type="range"] {
-    accent-color: var(--color-fg);
+    accent-color: var(--color-accent);
   }
 
   @media (prefers-reduced-motion: reduce) {

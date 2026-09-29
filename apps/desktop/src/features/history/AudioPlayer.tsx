@@ -15,7 +15,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
   const bars = speechBars(56, { seed: hashSeed(seed), phrases: 4 })
 
   if (failed) {
-    return <p className="font-mono text-[11px] text-fg/40">Audio file is not available.</p>
+    return <p className="font-mono text-[11px] text-subtle">Audio file is not available.</p>
   }
 
   const toggle = () => {
@@ -37,7 +37,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
   const progress = duration ? Math.min(1, current / duration) : 0
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-fg/10 bg-bg px-2.5 py-2">
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-2.5 py-2">
       <audio
         ref={audioRef}
         src={src}
@@ -55,7 +55,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
         type="button"
         onClick={toggle}
         aria-label={playing ? 'Pause' : 'Play'}
-        className="grid size-8 shrink-0 place-items-center rounded-full bg-fg text-bg transition-transform duration-200 ease-out-quint active:scale-95"
+        className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint active:scale-95"
       >
         {playing ? (
           <Pause className="size-3.5" fill="currentColor" strokeWidth={0} />
@@ -83,12 +83,12 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
         }}
         className="relative h-7 min-w-0 flex-1 cursor-pointer"
       >
-        <Waveform bars={bars} className="absolute inset-0 size-full text-fg/20" />
+        <Waveform bars={bars} className="absolute inset-0 size-full text-line-strong" />
         <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - progress * 100}% 0 0)` }}>
-          <Waveform bars={bars} className="size-full text-fg" />
+          <Waveform bars={bars} className="size-full text-accent" />
         </div>
       </div>
-      <span className="shrink-0 font-mono text-[11px] tabular-nums text-fg/45">
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-subtle">
         {formatClock(current * 1000)} / {formatClock(duration * 1000)}
       </span>
     </div>

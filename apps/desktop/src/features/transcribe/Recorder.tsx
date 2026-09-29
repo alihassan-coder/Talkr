@@ -81,28 +81,28 @@ export function Recorder({
   const elapsed = recording ? now - startedAt : 0
 
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-fg/10 bg-fg/[0.025] px-8 py-12">
+    <div className="flex flex-col items-center rounded-2xl border border-line bg-surface px-8 shadow-[var(--shadow-card)] py-12">
       <button
         type="button"
         onClick={() => void (recording ? stop() : start())}
         disabled={busy || (disabled && !recording)}
         aria-label={recording ? 'Stop recording' : 'Start recording'}
         aria-pressed={recording}
-        className="group relative grid size-24 place-items-center rounded-full border border-fg/15 transition-[border-color,transform] duration-300 ease-out-quint hover:border-fg/30 active:scale-[0.97] disabled:opacity-40"
+        className="group relative grid size-24 place-items-center rounded-full border border-line-strong transition-[border-color,transform] duration-300 ease-out-quint hover:border-line-strong active:scale-[0.97] disabled:opacity-40"
       >
         {recording ? (
-          <span className="absolute inset-0 animate-ping rounded-full border border-fg/20 [animation-duration:1.8s] motion-reduce:hidden" />
+          <span className="absolute inset-0 animate-ping rounded-full border border-line-strong [animation-duration:1.8s] motion-reduce:hidden" />
         ) : null}
         <span
           className={cx(
-            'bg-fg transition-all duration-400 ease-out-quint',
+            'bg-accent transition-all duration-400 ease-out-quint',
             recording ? 'size-7 rounded-lg' : 'size-9 rounded-full group-hover:scale-105',
           )}
         />
       </button>
 
       <p className="mt-7 font-mono text-4xl font-light tabular-nums tracking-tight">{formatDuration(elapsed)}</p>
-      <p className="mt-2 text-[13px] text-fg/45">
+      <p className="mt-2 text-[13px] text-muted">
         {busy ? (recording ? 'Saving…' : 'Opening microphone…') : recording ? 'Listening. Click to stop.' : 'Click to record'}
       </p>
 
@@ -112,7 +112,7 @@ export function Recorder({
           return (
             <span
               key={i}
-              className="w-[3px] rounded-full bg-fg transition-[height,opacity] duration-100"
+              className="w-[3px] rounded-full bg-accent transition-[height,opacity] duration-100"
               style={{ height: `${Math.max(8, h * 100)}%`, opacity: recording ? 0.35 + h * 0.65 : 0.15 }}
             />
           )

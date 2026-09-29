@@ -148,7 +148,7 @@ export function SpeakPage() {
       {tauri ? null : <PreviewNotice>Preview mode. Speech is generated in the Talkr desktop app.</PreviewNotice>}
 
       <div className="space-y-4">
-        <Card className="transition-colors duration-200 focus-within:border-fg/20">
+        <Card className="transition-colors duration-200 focus-within:border-line-strong">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -161,10 +161,10 @@ export function SpeakPage() {
             maxLength={MAX_CHARS}
             placeholder="Type or paste something to hear it…"
             aria-label="Text to speak"
-            className="block min-h-52 w-full resize-y bg-transparent px-6 pt-5 text-[15px] leading-relaxed text-fg outline-none placeholder:text-fg/30"
+            className="block min-h-52 w-full resize-y bg-transparent px-6 pt-5 text-[15px] leading-relaxed text-fg outline-none placeholder:text-subtle"
           />
           <div className="flex items-center justify-between px-4 pb-3 pl-6">
-            <span className="font-mono text-[11px] tabular-nums text-fg/35">
+            <span className="font-mono text-[11px] tabular-nums text-subtle">
               {text.length.toLocaleString('en-US')} / {MAX_CHARS.toLocaleString('en-US')}
             </span>
             <Button
@@ -202,7 +202,7 @@ export function SpeakPage() {
           <SpeedControl value={speed} onChange={setSpeed} />
 
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden text-[12px] text-fg/35 md:inline">
+            <span className="hidden text-[12px] text-subtle md:inline">
               <Kbd>Ctrl ⏎</Kbd>
             </span>
             <Button
@@ -223,9 +223,9 @@ export function SpeakPage() {
         <Card className="flex animate-rise items-center gap-4 px-6 py-4">
           <div className="min-w-0 flex-1">
             <div className="mb-2.5 flex items-center justify-between text-[13px]">
-              <span className="text-fg/70">Generating speech…</span>
+              <span className="text-muted">Generating speech…</span>
               {job.progress === null ? null : (
-                <span className="font-mono text-[11px] tabular-nums text-fg/40">{Math.round(job.progress * 100)}%</span>
+                <span className="font-mono text-[11px] tabular-nums text-subtle">{Math.round(job.progress * 100)}%</span>
               )}
             </div>
             <Progress value={job.progress} />

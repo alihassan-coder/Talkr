@@ -23,6 +23,9 @@ if (splash) {
       requestAnimationFrame(() => {
         splash.classList.add('out')
         splash.addEventListener('transitionend', () => splash.remove(), { once: true })
+        // transitionend can be skipped (hidden window, no animation); index.html's launch
+        // background only lets go of <html> once the splash node is gone.
+        setTimeout(() => splash.remove(), 600)
       }),
     Math.max(0, 450 - shownFor),
   )

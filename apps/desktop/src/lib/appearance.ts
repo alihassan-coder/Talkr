@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { isTauri } from '@/lib/api'
+import { findTheme } from '@/lib/themes'
 import { useUi } from '@/stores/ui'
 
 const DARK_QUERY = '(prefers-color-scheme: dark)'
@@ -24,9 +26,10 @@ export function useResolvedMode(): 'light' | 'dark' {
 let fadeTimer: ReturnType<typeof setTimeout> | undefined
 
 /**
- * Writes `data-theme` / `data-mode` on <html> (globals.css maps them to the two
- * colours) and keeps the native title bar in step. index.html sets the same
- * attributes before first paint, so the first run here is usually a no-op.
+ * Writes `data-theme` / `data-mode` on <html> (globals.css maps them to the
+ * colour tokens) and keeps the native title bar and window background in step.
+ * index.html sets the same attributes before first paint, so the first run here
+ * is usually a no-op.
  */
 export function useApplyAppearance() {
   const mode = useUi((s) => s.mode)
@@ -44,6 +47,15 @@ export function useApplyAppearance() {
     }
     root.dataset.theme = theme
     root.dataset.mode = resolved
+  }, [theme, resolved])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    // The native window and webview show this colour while resizing or loading, before
+    // the page paints. tauri.conf.json keeps Graphite dark as the pre-JS default.
+    getCurrentWebviewWindow()
+      .setBackgroundColor(findTheme(theme)[resolved].bg)
+      .catch(() => {})
   }, [theme, resolved])
 
   useEffect(() => {

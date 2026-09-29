@@ -16,31 +16,39 @@
           var state = (saved && saved.state) || {}
           if (state.mode === 'light' || state.mode === 'dark') mode = state.mode
           if (typeof state.theme === 'string') theme = state.theme
+          // Renamed ids from earlier versions. Same table as migrateThemeId in src/lib/themes.ts.
+          theme = { midnight: 'nightfall', plum: 'orchid', sand: 'dune' }[theme] || theme
         } catch (e) {}
         try {
           if (mode === 'system') mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
         } catch (e) {
           mode = 'dark'
         }
+        // The launch screen paints before any stylesheet, so it needs the palette here:
+        // [bg, surface, fg]. KEEP IN SYNC with src/lib/themes.ts and src/styles/globals.css.
+        var palettes = {
+          graphite: { dark: ['#0b0b0c', '#141416', '#ededea'], light: ['#f3f3f1', '#ffffff', '#121212'] },
+          nightfall: { dark: ['#0a0c15', '#121526', '#e4e7f7'], light: ['#f1f3fb', '#ffffff', '#121833'] },
+          forest: { dark: ['#09100c', '#101a14', '#e1ece4'], light: ['#eff4f0', '#ffffff', '#0f2419'] },
+          ember: { dark: ['#110c0a', '#1b1411', '#f4e9e1'], light: ['#faf5f1', '#ffffff', '#2a170d'] },
+          orchid: { dark: ['#0f0b14', '#19121f', '#eee6f6'], light: ['#f7f3fa', '#ffffff', '#24142f'] },
+          dune: { dark: ['#12100b', '#1c1912', '#f0e7d4'], light: ['#f7f2e8', '#fffdf8', '#2b2417'] },
+          ocean: { dark: ['#081114', '#0f1b1f', '#e0eef1'], light: ['#eef6f7', '#ffffff', '#0d2429'] },
+          rose: { dark: ['#130b0e', '#1d1216', '#f6e6eb'], light: ['#fbf3f5', '#ffffff', '#2d121a'] },
+        }
+        if (!palettes.hasOwnProperty(theme)) theme = 'graphite'
+        var colors = palettes[theme][mode]
         root.setAttribute('data-theme', theme)
         root.setAttribute('data-mode', mode)
-        // The launch screen paints before any stylesheet, so it needs the palette here.
-        // Keep in sync with src/lib/themes.ts.
-        var palettes = {
-          graphite: { dark: ['#0b0b0c', '#ededea'], light: ['#f5f4f0', '#121212'] },
-          midnight: { dark: ['#0a0e17', '#e3e9f5'], light: ['#eef2f9', '#0e1a33'] },
-          forest: { dark: ['#0a110d', '#e2ece4'], light: ['#eef4ef', '#10231a'] },
-          ember: { dark: ['#120c09', '#f3e5dc'], light: ['#f8efe8', '#2d150b'] },
-          plum: { dark: ['#100b13', '#ece3f3'], light: ['#f5eff8', '#24142f'] },
-          sand: { dark: ['#12100b', '#efe5d1'], light: ['#f6f0e3', '#2a2316'] },
-        }
-        var pair = (palettes[theme] || palettes.graphite)[mode]
-        root.style.setProperty('--splash-bg', pair[0])
-        root.style.setProperty('--splash-fg', pair[1])
+        root.style.setProperty('--splash-bg', colors[0])
+        root.style.setProperty('--splash-surface', colors[1])
+        root.style.setProperty('--splash-fg', colors[2])
       })()
     </script>
     <style>
-      html { background: var(--splash-bg, #0b0b0c); }
+      /* Only while the launch screen is up: this unlayered rule would otherwise beat the
+         themed background in globals.css (@layer base) after a live mode or theme switch. */
+      html:has(#splash) { background: var(--splash-bg, #0b0b0c); }
       #splash {
         position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
         background: var(--splash-bg, #0b0b0c); color: var(--splash-fg, #ededea);

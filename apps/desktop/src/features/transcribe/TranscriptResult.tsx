@@ -42,10 +42,10 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
 
   return (
     <Card className="animate-rise overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-fg/[0.08] px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
         <div className="min-w-0">
           <p className="truncate text-[15px] font-medium tracking-[-0.01em]">{name}</p>
-          <p className="mt-0.5 font-mono text-[11px] text-fg/40">{meta.join(' · ')}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-subtle">{meta.join(' · ')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -67,7 +67,7 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
       </div>
 
       {empty ? (
-        <p className="px-6 py-10 text-center text-[13.5px] text-fg/45">No speech was detected in this audio.</p>
+        <p className="px-6 py-10 text-center text-[13.5px] text-muted">No speech was detected in this audio.</p>
       ) : (
         <>
           {segments.length > 0 ? (
@@ -91,24 +91,24 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
                   key={`${s.startMs}-${i}`}
                   className="flex gap-5 rounded-lg px-3 py-2.5 transition-colors duration-200 hover:bg-fg/[0.04]"
                 >
-                  <span className="w-11 shrink-0 pt-[3px] font-mono text-[11px] tabular-nums text-fg/40">
+                  <span className="w-11 shrink-0 pt-[3px] font-mono text-[11px] tabular-nums text-subtle">
                     {formatTimestamp(s.startMs)}
                   </span>
-                  <span data-selectable className="text-[15px] leading-snug text-fg/90">
+                  <span data-selectable className="text-[15px] leading-snug text-fg">
                     {s.text.trim()}
                   </span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p data-selectable className="whitespace-pre-wrap px-6 py-5 text-[15px] leading-relaxed text-fg/90">
+            <p data-selectable className="whitespace-pre-wrap px-6 py-5 text-[15px] leading-relaxed text-fg">
               {item.text.trim()}
             </p>
           )}
         </>
       )}
 
-      <div className="flex items-center justify-between gap-3 border-t border-fg/[0.08] px-6 py-3 font-mono text-[11px] text-fg/40">
+      <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-3 font-mono text-[11px] text-subtle">
         <span>
           Done in {formatSeconds(item.processingMs)} · {item.device.toUpperCase()}
         </span>

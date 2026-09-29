@@ -230,23 +230,23 @@ export function Select({
         onClick={() => (isOpen ? close() : show(Math.max(selectedIndex, 0)))}
         onKeyDown={onKeyDown}
         className={cx(
-          'relative inline-flex h-9 min-w-0 items-center rounded-full border pl-3.5 pr-8 text-left text-[13px] outline-none transition-colors duration-200 focus-visible:border-fg/40 disabled:cursor-not-allowed disabled:opacity-40',
-          isOpen ? 'border-fg/30 bg-fg/[0.03]' : 'border-fg/12 enabled:hover:border-fg/20',
+          'relative inline-flex h-9 min-w-0 items-center rounded-full border pl-3.5 pr-8 text-left text-[13px] outline-none transition-[border-color,box-shadow] duration-200 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_22%,transparent)] disabled:cursor-not-allowed disabled:opacity-40',
+          isOpen ? 'border-line-strong bg-surface' : 'border-line bg-surface enabled:hover:border-line-strong',
           className,
         )}
       >
         {label ? (
-          <span id={labelId} className="mr-1.5 shrink-0 text-fg/45">
+          <span id={labelId} className="mr-1.5 shrink-0 text-subtle">
             {label}
           </span>
         ) : null}
-        <span className={cx('min-w-0 truncate', selected ? 'font-medium text-fg' : 'text-fg/45')}>
+        <span className={cx('min-w-0 truncate', selected ? 'font-medium text-fg' : 'text-subtle')}>
           {selected ? selected.label : placeholder}
         </span>
         <ChevronDown
           aria-hidden="true"
           className={cx(
-            'pointer-events-none absolute right-3 size-3.5 text-fg/45 transition-transform duration-250 ease-out-quint',
+            'pointer-events-none absolute right-3 size-3.5 text-subtle transition-transform duration-250 ease-out-quint',
             isOpen && 'rotate-180',
           )}
           strokeWidth={2}
@@ -263,20 +263,20 @@ export function Select({
               tabIndex={-1}
               // Keep focus on the trigger while clicking inside the list.
               onMouseDown={(e) => e.preventDefault()}
-              className="fixed z-50 max-w-[min(360px,calc(100vw-16px))] animate-pop overflow-y-auto overscroll-contain rounded-xl border border-fg/[0.1] bg-bg p-1 text-[13px] shadow-[var(--shadow-pop)] outline-none"
+              className="fixed z-50 max-w-[min(360px,calc(100vw-16px))] animate-pop overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface p-1 text-[13px] shadow-[var(--shadow-pop)] outline-none"
             >
-              {options.length === 0 ? <p className="px-2.5 py-1.5 text-fg/40">No options</p> : null}
+              {options.length === 0 ? <p className="px-2.5 py-1.5 text-subtle">No options</p> : null}
               {sections.map((section, s) => (
                 <div
                   key={`${section.group ?? ''}-${s}`}
                   role={section.group ? 'group' : undefined}
                   aria-labelledby={section.group ? `${id}-group-${s}` : undefined}
-                  className={cx(s > 0 && section.group && 'mt-1 border-t border-fg/[0.07] pt-1')}
+                  className={cx(s > 0 && section.group && 'mt-1 border-t border-line pt-1')}
                 >
                   {section.group ? (
                     <p
                       id={`${id}-group-${s}`}
-                      className="px-2.5 pb-1 pt-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-fg/40"
+                      className="px-2.5 pb-1 pt-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle"
                     >
                       {section.group}
                     </p>
@@ -296,17 +296,18 @@ export function Select({
                         onClick={() => choose(index)}
                         className={cx(
                           'flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-lg py-1.5 pl-2.5 pr-2 transition-colors duration-100',
-                          index === active && 'bg-fg/[0.07]',
-                          isSelected ? 'font-medium text-fg' : 'text-fg/70',
+                          index === active && 'bg-fg/[0.06]',
+                          isSelected || index === active ? 'text-fg' : 'text-muted',
+                          isSelected && 'font-medium',
                         )}
                       >
                         <span className="min-w-0 flex-1 truncate">{option.label}</span>
                         {option.hint ? (
-                          <span className="shrink-0 font-mono text-[11px] font-normal text-fg/40">{option.hint}</span>
+                          <span className="shrink-0 font-mono text-[11px] font-normal text-subtle">{option.hint}</span>
                         ) : null}
                         <Check
                           aria-hidden="true"
-                          className={cx('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')}
+                          className={cx('size-3.5 shrink-0 text-accent', isSelected ? 'opacity-100' : 'opacity-0')}
                           strokeWidth={2.25}
                         />
                       </div>

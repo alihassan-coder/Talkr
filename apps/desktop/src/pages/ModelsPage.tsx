@@ -76,7 +76,7 @@ export function ModelsPage() {
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Segmented label="Model type" value={kind} options={KIND_OPTIONS} onChange={setKind} />
-          <p className="font-mono text-[11px] text-fg/40">
+          <p className="font-mono text-[11px] text-subtle">
             {KIND_META[kind]}
             {loaded && !error ? ` · ${installedCount} of ${models.length + imported.length} installed` : ''}
           </p>
@@ -97,7 +97,7 @@ export function ModelsPage() {
           <ListSkeleton />
         ) : (
           <Card className="overflow-hidden">
-            <ul className="divide-y divide-fg/[0.08]">
+            <ul className="divide-y divide-line">
               {models.map((model) => (
                 <ModelRow
                   key={model.id}
@@ -115,8 +115,8 @@ export function ModelsPage() {
         )}
       </section>
 
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-fg/[0.08] pt-5">
-        <p className="font-mono text-[11px] text-fg/40">Models are stored in ~/.talkr/models</p>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+        <p className="font-mono text-[11px] text-subtle">Models are stored in ~/.talkr/models</p>
         <Button
           variant="ghost"
           size="sm"
@@ -169,17 +169,17 @@ function HardwareStrip({
   ]
 
   return (
-    <Card className="grid grid-cols-4 divide-x divide-fg/[0.08]">
+    <Card className="grid grid-cols-4 divide-x divide-line">
       {cells.map((cell) => (
         <div key={cell.label} className="min-w-0 px-5 py-4">
-          <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-fg/40">{cell.label}</p>
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-subtle">{cell.label}</p>
           <p className="mt-2 flex items-center gap-2 text-[15px] font-medium tracking-[-0.01em]">
             {cell.dot ? (
-              <span className={cx('size-1.5 shrink-0 rounded-full', accelerated ? 'bg-fg' : 'bg-fg/30')} />
+              <span className={cx('size-1.5 shrink-0 rounded-full', accelerated ? 'bg-accent' : 'bg-fg/30')} />
             ) : null}
             {cell.value}
           </p>
-          <p className="mt-1 truncate font-mono text-[11px] text-fg/35" title={cell.detail}>
+          <p className="mt-1 truncate font-mono text-[11px] text-subtle" title={cell.detail}>
             {cell.detail}
           </p>
         </div>
@@ -211,21 +211,21 @@ function ModelRow({
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
           <span className="font-medium tracking-[-0.01em]">{base}</span>
-          {variant ? <span className="text-fg/45">{variant}</span> : null}
+          {variant ? <span className="text-muted">{variant}</span> : null}
           {isRecommended(model) ? <Badge solid>Recommended</Badge> : null}
           {tags.map((tag) => (
             <Badge key={tag}>{tag}</Badge>
           ))}
         </p>
-        <p className="mt-1 line-clamp-1 text-[13px] text-fg/50">{model.description}</p>
-        <p className="mt-1.5 font-mono text-[11px] text-fg/40" title={model.license}>
+        <p className="mt-1 line-clamp-1 text-[13px] text-muted">{model.description}</p>
+        <p className="mt-1.5 font-mono text-[11px] text-subtle" title={model.license}>
           {describeLanguages(model.languages)} · {shortLicense(model.license)} · {formatBytes(model.sizeBytes)}
         </p>
         {tooBig ? (
-          <p className="mt-2 flex items-center gap-1.5 text-[12px] text-fg/65">
+          <p className="mt-2 flex items-center gap-1.5 text-[12px] text-muted">
             <TriangleAlert className="size-3.5 shrink-0" strokeWidth={1.75} />
             Needs more memory than this computer has
-            <span className="font-mono text-[11px] text-fg/35">{formatBytes(model.ramRecommendedBytes)} recommended</span>
+            <span className="font-mono text-[11px] text-subtle">{formatBytes(model.ramRecommendedBytes)} recommended</span>
           </p>
         ) : null}
       </div>
@@ -245,7 +245,7 @@ function ModelRow({
             onClick={() => void startDownload(model.id)}
           >
             Download
-            <span className="font-mono text-[11px] text-fg/45">{formatBytes(model.sizeBytes)}</span>
+            <span className="font-mono text-[11px] text-subtle">{formatBytes(model.sizeBytes)}</span>
           </Button>
         )}
       </div>
@@ -260,10 +260,10 @@ function ImportedRow({ model }: { model: InstalledModel }) {
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
           <span className="font-medium tracking-[-0.01em]">{model.name}</span>
-          <span className="text-fg/45">Imported</span>
+          <span className="text-muted">Imported</span>
         </p>
-        <p className="mt-1 line-clamp-1 text-[13px] text-fg/50">Added from a file on this computer.</p>
-        <p className="mt-1.5 truncate font-mono text-[11px] text-fg/40" title={model.path}>
+        <p className="mt-1 line-clamp-1 text-[13px] text-muted">Added from a file on this computer.</p>
+        <p className="mt-1.5 truncate font-mono text-[11px] text-subtle" title={model.path}>
           {model.engine} · {formatBytes(model.manifest.sizeBytes)}
         </p>
       </div>
@@ -295,9 +295,9 @@ function DownloadStatus({ download, onCancel }: { download: ActiveDownload; onCa
     <div className="flex w-56 items-center gap-2">
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex items-baseline justify-between gap-2 font-mono text-[11px] tabular-nums">
-          <span className="text-fg/80">{label}</span>
+          <span className="text-fg">{label}</span>
           {download.state === 'downloading' ? (
-            <span className="truncate text-fg/40">
+            <span className="truncate text-subtle">
               {bytes}
               {download.speed > 0 ? ` · ${formatSpeed(download.speed)}` : ''}
             </span>
@@ -402,7 +402,7 @@ function ImportMenu() {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-2 w-64 animate-rise rounded-xl border border-fg/10 bg-bg p-1 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-20 mt-2 w-64 animate-rise rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-pop)]"
         >
           <MenuItem title="Speech to text" detail="Whisper GGML file · .bin" onClick={() => void pick('stt')} />
           <MenuItem title="Text to speech" detail="sherpa-onnx model folder" onClick={() => void pick('tts')} />
@@ -421,14 +421,14 @@ function MenuItem({ title, detail, onClick }: { title: string; detail: string; o
       className="block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-200 hover:bg-fg/[0.06]"
     >
       <span className="block text-[13px] font-medium">{title}</span>
-      <span className="mt-0.5 block font-mono text-[11px] text-fg/40">{detail}</span>
+      <span className="mt-0.5 block font-mono text-[11px] text-subtle">{detail}</span>
     </button>
   )
 }
 
 function ListSkeleton() {
   return (
-    <Card className="divide-y divide-fg/[0.08] overflow-hidden">
+    <Card className="divide-y divide-line overflow-hidden">
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className="flex items-center gap-6 px-5 py-5">
           <div className="flex-1 space-y-2.5">

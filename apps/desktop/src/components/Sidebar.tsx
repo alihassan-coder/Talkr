@@ -49,11 +49,16 @@ function Item({
       className={({ isActive }) =>
         cx(
           'group/tip relative flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors duration-200',
-          isActive ? 'bg-fg/[0.08] text-fg' : 'text-fg/50 hover:bg-fg/[0.04] hover:text-fg/85',
+          isActive ? 'bg-fg/[0.07] font-medium text-fg' : 'text-muted hover:bg-fg/[0.045] hover:text-fg',
         )
       }
     >
-      <Icon className="size-4 shrink-0" strokeWidth={1.75} />
+      {/* Accent marker on the active item. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-2.5 left-0 w-[3px] scale-y-0 rounded-r-full bg-accent transition-transform duration-250 ease-out-quint group-aria-[current=page]/tip:scale-y-100"
+      />
+      <Icon className="size-4 shrink-0 group-aria-[current=page]/tip:text-accent" strokeWidth={1.75} />
       {/* Clipped rather than reflowed while the width animates, so nothing wraps mid-transition. */}
       <span
         className={cx(
@@ -80,7 +85,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
   return (
     <aside
       className={cx(
-        'relative z-20 flex shrink-0 flex-col border-r border-fg/[0.08] bg-fg/[0.015] p-3 transition-[width] duration-250 ease-out-quint',
+        'relative z-20 flex shrink-0 flex-col border-r border-line bg-panel p-3 transition-[width] duration-250 ease-out-quint',
         collapsed ? 'w-[60px]' : 'w-56',
       )}
     >
@@ -102,7 +107,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
             onClick={toggle}
             aria-label="Expand sidebar"
             aria-expanded={false}
-            className="group/tip absolute inset-y-0 left-0 grid w-9 place-items-center rounded-lg text-fg/60 transition-colors duration-200 hover:bg-fg/[0.06] hover:text-fg"
+            className="group/tip absolute inset-y-0 left-0 grid w-9 place-items-center rounded-lg text-muted transition-colors duration-200 hover:bg-fg/[0.06] hover:text-fg"
           >
             <span className="opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-visible/tip:opacity-100">
               <PanelLeftOpen className="size-4" strokeWidth={1.75} />
@@ -115,7 +120,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
             onClick={toggle}
             aria-label="Collapse sidebar"
             aria-expanded={true}
-            className="group/tip absolute right-0 grid size-8 place-items-center rounded-lg text-fg/40 transition-colors duration-200 hover:bg-fg/[0.06] hover:text-fg"
+            className="group/tip absolute right-0 grid size-8 place-items-center rounded-lg text-subtle transition-colors duration-200 hover:bg-fg/[0.06] hover:text-fg"
           >
             <PanelLeftClose className="size-4" strokeWidth={1.75} />
             <Tip label="Collapse sidebar" shortcut="Ctrl B" />

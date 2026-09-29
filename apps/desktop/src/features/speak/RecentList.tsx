@@ -17,7 +17,7 @@ export function RecentList({
   return (
     <section>
       <Kicker className="mb-3 px-1">Recent</Kicker>
-      <ul className="divide-y divide-fg/[0.06] rounded-2xl border border-fg/10">
+      <ul className="divide-y divide-line rounded-2xl border border-line">
         {items.map((item) => (
           <li key={item.id}>
             <button
@@ -28,17 +28,17 @@ export function RecentList({
                 item.id === activeId && 'bg-fg/[0.04]',
               )}
             >
-              <span className="grid size-7 shrink-0 place-items-center rounded-full border border-fg/12 text-fg/50 transition-colors group-hover:border-fg/25 group-hover:text-fg">
+              <span className="grid size-7 shrink-0 place-items-center rounded-full border border-line text-subtle transition-colors group-hover:border-line-strong group-hover:text-fg">
                 <Play className="size-3 translate-x-px" fill="currentColor" strokeWidth={0} />
               </span>
-              <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg/85">{item.title}</span>
+              <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg">{item.title}</span>
               {item.voiceId ? (
-                <span className="hidden max-w-32 truncate font-mono text-[11px] text-fg/40 sm:block">{item.voiceId}</span>
+                <span className="hidden max-w-32 truncate font-mono text-[11px] text-subtle sm:block">{item.voiceId}</span>
               ) : null}
-              <span className="w-10 text-right font-mono text-[11px] tabular-nums text-fg/40">
+              <span className="w-10 text-right font-mono text-[11px] tabular-nums text-subtle">
                 {item.durationMs === null ? '–' : formatDuration(item.durationMs)}
               </span>
-              <span className="w-20 text-right text-[12px] text-fg/35">{relativeTime(item.createdAt)}</span>
+              <span className="w-20 text-right text-[12px] text-subtle">{relativeTime(item.createdAt)}</span>
             </button>
           </li>
         ))}

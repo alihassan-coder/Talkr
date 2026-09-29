@@ -5,10 +5,11 @@ import { cx } from '@/lib/cx'
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-fg text-bg hover:bg-fg/90 disabled:bg-fg/30',
-  secondary: 'border border-fg/12 text-fg/85 hover:bg-fg/[0.06] hover:text-fg disabled:text-fg/30',
-  ghost: 'text-fg/60 hover:bg-fg/[0.06] hover:text-fg disabled:text-fg/25',
-  danger: 'border border-fg/12 text-fg/70 hover:border-fg/30 hover:text-fg disabled:text-fg/25',
+  primary: 'bg-accent text-on-accent hover:bg-accent/88 disabled:bg-accent/30',
+  secondary:
+    'border border-line text-fg hover:border-line-strong hover:bg-fg/[0.05] disabled:border-line disabled:bg-transparent disabled:text-fg/30',
+  ghost: 'text-muted hover:bg-fg/[0.06] hover:text-fg disabled:bg-transparent disabled:text-fg/30',
+  danger: 'border border-line text-muted hover:border-line-strong hover:text-fg disabled:border-line disabled:text-fg/30',
 }
 
 export function Button({
@@ -59,7 +60,7 @@ export function IconButton({
       title={label}
       className={cx(
         'grid size-8 shrink-0 place-items-center rounded-lg transition-colors duration-200 disabled:opacity-30',
-        active ? 'bg-fg/[0.08] text-fg' : 'text-fg/50 hover:bg-fg/[0.06] hover:text-fg',
+        active ? 'bg-fg/[0.08] text-fg' : 'text-subtle hover:bg-fg/[0.06] hover:text-fg',
         className,
       )}
       {...props}
@@ -70,12 +71,12 @@ export function IconButton({
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-2xl border border-fg/10 bg-fg/[0.025]', className)}>{children}</div>
+  return <div className={cx('rounded-2xl border border-line bg-surface shadow-[var(--shadow-card)]', className)}>{children}</div>
 }
 
 /** Small mono uppercase label. */
 export function Kicker({ className, children }: { className?: string; children: ReactNode }) {
-  return <p className={cx('font-mono text-[10.5px] uppercase tracking-[0.16em] text-fg/45', className)}>{children}</p>
+  return <p className={cx('font-mono text-[10.5px] uppercase tracking-[0.16em] text-subtle', className)}>{children}</p>
 }
 
 export function Badge({ solid = false, children }: { solid?: boolean; children: ReactNode }) {
@@ -83,7 +84,7 @@ export function Badge({ solid = false, children }: { solid?: boolean; children: 
     <span
       className={cx(
         'inline-flex items-center rounded-full px-2 py-px text-[10.5px] font-medium',
-        solid ? 'bg-fg text-bg' : 'border border-fg/12 text-fg/60',
+        solid ? 'bg-accent text-on-accent' : 'border border-line text-muted',
       )}
     >
       {children}
@@ -96,7 +97,7 @@ export function PageHeader({ title, description, actions }: { title: string; des
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 className="text-[28px] font-semibold leading-none tracking-[-0.035em]">{title}</h1>
-        {description ? <p className="mt-2 text-[13.5px] text-fg/50">{description}</p> : null}
+        {description ? <p className="mt-2 text-[13.5px] text-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
     </header>
@@ -123,12 +124,12 @@ export function Segmented<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="relative inline-grid rounded-full border border-fg/10 bg-fg/[0.03] p-0.5"
+      className="relative inline-grid rounded-full border border-line bg-fg/[0.04] p-0.5"
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       <span
         aria-hidden="true"
-        className="absolute inset-y-0.5 left-0.5 rounded-full bg-fg transition-transform duration-400 ease-out-quint"
+        className="absolute inset-y-0.5 left-0.5 rounded-full bg-accent shadow-[var(--shadow-card)] transition-transform duration-400 ease-out-quint"
         style={{ width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(${index * 100}%)` }}
       />
       {options.map((o) => (
@@ -140,7 +141,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cx(
             'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-300',
-            o.value === value ? 'text-bg' : 'text-fg/55 hover:text-fg',
+            o.value === value ? 'text-on-accent' : 'text-muted hover:text-fg',
           )}
         >
           {o.icon}
@@ -161,10 +162,10 @@ export function Progress({ value, className }: { value: number | null; className
       className={cx('relative h-[3px] overflow-hidden rounded-full bg-fg/10', className)}
     >
       {value === null ? (
-        <span className="absolute inset-y-0 w-1/3 animate-shimmer rounded-full bg-fg/70" />
+        <span className="absolute inset-y-0 w-1/3 animate-shimmer rounded-full bg-accent/80" />
       ) : (
         <span
-          className="absolute inset-y-0 left-0 rounded-full bg-fg transition-[width] duration-300 ease-out-quint"
+          className="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-300 ease-out-quint"
           style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }}
         />
       )}
@@ -184,10 +185,10 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-fg/12 px-8 py-14 text-center">
-      <span className="grid size-11 place-items-center rounded-full border border-fg/10 text-fg/60">{icon}</span>
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-line-strong px-8 py-14 text-center">
+      <span className="grid size-11 place-items-center rounded-full border border-line bg-surface text-muted shadow-[var(--shadow-card)]">{icon}</span>
       <h2 className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{title}</h2>
-      <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-fg/50">{description}</p>
+      <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted">{description}</p>
       {action ? <div className="mt-6">{action}</div> : null}
     </div>
   )
@@ -195,6 +196,6 @@ export function EmptyState({
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded border border-fg/12 bg-fg/[0.04] px-1.5 py-px font-mono text-[10.5px] text-fg/55">{children}</kbd>
+    <kbd className="rounded border border-line bg-surface px-1.5 py-px font-mono text-[10.5px] text-muted">{children}</kbd>
   )
 }

@@ -139,12 +139,12 @@ export function TranscribePage() {
       {job.running ? (
         <Card className="animate-rise px-6 py-5">
           <div className="flex items-center gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full border border-fg/10 text-fg/60">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full border border-line text-muted">
               <AudioWaveform className="size-4" strokeWidth={1.75} />
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[14px] font-medium">{activeName}</p>
-              <p className="mt-0.5 font-mono text-[11px] tabular-nums text-fg/40">
+              <p className="mt-0.5 font-mono text-[11px] tabular-nums text-subtle">
                 {job.progress === null ? 'Transcribing…' : `Transcribing · ${Math.round(job.progress * 100)}%`}
               </p>
             </div>

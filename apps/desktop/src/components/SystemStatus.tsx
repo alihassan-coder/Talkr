@@ -38,19 +38,19 @@ export function SystemStatus() {
     <button
       type="button"
       onClick={() => navigate('/models')}
-      className="block w-full rounded-lg border border-fg/[0.08] p-3 text-left transition-colors duration-200 hover:border-fg/15 hover:bg-fg/[0.03]"
+      className="block w-full rounded-lg border border-line p-3 text-left transition-colors duration-200 hover:border-line-strong hover:bg-fg/[0.03]"
     >
-      <p className="flex items-center gap-2 text-xs text-fg/70">
-        <span className={cx('size-1.5 shrink-0 rounded-full', accelerated ? 'bg-fg' : 'bg-fg/30')} />
+      <p className="flex items-center gap-2 text-xs text-muted">
+        <span className={cx('size-1.5 shrink-0 rounded-full', accelerated ? 'bg-accent' : 'bg-fg/30')} />
         {title}
       </p>
-      <p className="mt-1 truncate font-mono text-[11px] text-fg/35" title={detail}>
+      <p className="mt-1 truncate font-mono text-[11px] text-subtle" title={detail}>
         {detail}
       </p>
       {active.length > 0 ? (
         <div className="mt-3 space-y-1.5">
           <Progress value={overall} />
-          <p className="font-mono text-[11px] text-fg/45">
+          <p className="font-mono text-[11px] text-subtle">
             Downloading {active.length} {active.length === 1 ? 'model' : 'models'}
           </p>
         </div>

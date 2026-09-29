@@ -56,19 +56,19 @@ export function DropZone({ onFile, disabled = false }: { onFile: (path: string) 
     <div
       className={cx(
         'flex flex-col items-center rounded-2xl border border-dashed px-8 py-14 text-center transition-colors duration-300 ease-out-quint',
-        over && !disabled ? 'border-fg/40 bg-fg/[0.05]' : 'border-fg/15 bg-fg/[0.015]',
+        over && !disabled ? 'border-accent bg-accent/[0.06]' : 'border-line-strong bg-surface',
       )}
     >
       <span
         className={cx(
           'grid size-12 place-items-center rounded-full border transition-[transform,border-color,color] duration-300 ease-out-quint',
-          over ? '-translate-y-1 border-fg/30 text-fg' : 'border-fg/10 text-fg/55',
+          over ? '-translate-y-1 border-accent text-accent' : 'border-line text-muted',
         )}
       >
         <Upload className="size-5" strokeWidth={1.75} />
       </span>
       <p className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{over ? 'Release to transcribe' : 'Drop an audio file'}</p>
-      <p className="mt-1.5 font-mono text-[11px] tracking-wide text-fg/40">MP3, WAV, FLAC, OGG, M4A</p>
+      <p className="mt-1.5 font-mono text-[11px] tracking-wide text-subtle">MP3, WAV, FLAC, OGG, M4A</p>
       <Button className="mt-6" onClick={() => void choose()} disabled={disabled}>
         Choose file
       </Button>

@@ -14,14 +14,14 @@ export function Toaster() {
           role={t.tone === 'error' ? 'alert' : 'status'}
           className={cx(
             'pointer-events-auto flex animate-rise items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-[var(--shadow-pop)]',
-            t.tone === 'error' ? 'border-fg/25 bg-bg text-fg' : 'border-fg/10 bg-bg text-fg/85',
+            t.tone === 'error' ? 'border-line-strong bg-surface text-fg' : 'border-line bg-surface text-fg',
           )}
         >
-          {t.tone === 'error' ? <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-fg" /> : null}
+          {t.tone === 'error' ? <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" /> : null}
           <p className="flex-1 leading-relaxed" data-selectable>
             {t.message}
           </p>
-          <button type="button" onClick={() => dismiss(t.id)} aria-label="Dismiss" className="text-fg/40 hover:text-fg">
+          <button type="button" onClick={() => dismiss(t.id)} aria-label="Dismiss" className="text-subtle hover:text-fg">
             <X className="size-3.5" strokeWidth={2} />
           </button>
         </div>
