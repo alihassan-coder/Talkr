@@ -29,7 +29,7 @@ export const platforms: Platform[] = [
     detail: '10 and 11',
     requirement: 'Windows 10 or later, x64',
     files: [
-      { name: `Talkr_${VERSION}_x64-setup.exe`, format: 'Installer', arch: 'x64', size: '5 MB' },
+      { name: `Talkr_${VERSION}_x64-setup.exe`, format: 'Installer', arch: 'x64', size: '8 MB' },
       { name: `Talkr_${VERSION}_x64_en-US.msi`, format: 'MSI package', arch: 'x64', size: '12 MB' },
     ],
   },
@@ -38,14 +38,14 @@ export const platforms: Platform[] = [
     name: 'macOS',
     detail: 'Apple Silicon',
     requirement: 'macOS 11 or later, M1 and newer',
-    files: [{ name: `Talkr_${VERSION}_aarch64.dmg`, format: 'Disk image', arch: 'arm64', size: '~15 MB' }],
+    files: [{ name: `Talkr_${VERSION}_aarch64.dmg`, format: 'Disk image', arch: 'arm64', size: '11 MB' }],
   },
   {
     id: 'macos-intel',
     name: 'macOS',
     detail: 'Intel',
     requirement: 'macOS 11 or later, Intel Macs',
-    files: [{ name: `Talkr_${VERSION}_x64.dmg`, format: 'Disk image', arch: 'x64', size: '~15 MB' }],
+    files: [{ name: `Talkr_${VERSION}_x64.dmg`, format: 'Disk image', arch: 'x64', size: '13 MB' }],
   },
   {
     id: 'linux',
@@ -53,9 +53,9 @@ export const platforms: Platform[] = [
     detail: 'x86_64',
     requirement: 'glibc 2.31 or later',
     files: [
-      { name: `Talkr_${VERSION}_amd64.AppImage`, format: 'AppImage', arch: 'x86_64', size: '~90 MB' },
-      { name: `Talkr_${VERSION}_amd64.deb`, format: 'Debian, Ubuntu', arch: 'x86_64', size: '~15 MB' },
-      { name: `Talkr-${VERSION}-1.x86_64.rpm`, format: 'Fedora, openSUSE', arch: 'x86_64', size: '~15 MB' },
+      { name: `Talkr_${VERSION}_amd64.AppImage`, format: 'AppImage', arch: 'x86_64', size: '98 MB' },
+      { name: `Talkr_${VERSION}_amd64.deb`, format: 'Debian, Ubuntu', arch: 'x86_64', size: '14 MB' },
+      { name: `Talkr-${VERSION}-1.x86_64.rpm`, format: 'Fedora, openSUSE', arch: 'x86_64', size: '14 MB' },
     ],
   },
 ]
