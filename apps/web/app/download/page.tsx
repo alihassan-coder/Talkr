@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 }
 
 const checks = [
-  { os: 'Windows', command: 'Get-FileHash .\\talkr-x64.msi -Algorithm SHA256' },
+  { os: 'Windows', command: 'Get-FileHash .\\Talkr_0.1.0_x64-setup.exe -Algorithm SHA256' },
   { os: 'macOS', command: 'shasum -a 256 Talkr_0.1.0_aarch64.dmg' },
   { os: 'Linux', command: 'sha256sum Talkr_0.1.0_amd64.AppImage' },
 ]
