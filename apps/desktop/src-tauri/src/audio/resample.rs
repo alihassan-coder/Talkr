@@ -1,8 +1,8 @@
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
 pub fn resample_to_16k_mono(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
-    if from_rate == 16000 {
+    if from_rate == 16000 || samples.is_empty() {
         return Ok(samples.to_vec());
     }
 

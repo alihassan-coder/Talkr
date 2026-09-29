@@ -1,5 +1,4 @@
-use std::path::{Path, PathBuf};
-use dirs;
+use std::path::PathBuf;
 use crate::error::{AppError, Result};
 
 #[derive(Debug, Clone)]
@@ -86,23 +85,23 @@ impl AppPaths {
 }
 
 impl serde::Serialize for AppPaths {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppPaths", 10)?;
+        let mut state = serializer.serialize_struct("AppPaths", 11)?;
         state.serialize_field("home", &self.home.to_string_lossy())?;
         state.serialize_field("models", &self.models.to_string_lossy())?;
-        state.serialize_field("models_stt", &self.models_stt.to_string_lossy())?;
-        state.serialize_field("models_tts", &self.models_tts.to_string_lossy())?;
+        state.serialize_field("modelsStt", &self.models_stt.to_string_lossy())?;
+        state.serialize_field("modelsTts", &self.models_tts.to_string_lossy())?;
         state.serialize_field("audio", &self.audio.to_string_lossy())?;
         state.serialize_field("history", &self.history.to_string_lossy())?;
         state.serialize_field("cache", &self.cache.to_string_lossy())?;
-        state.serialize_field("cache_downloads", &self.cache_downloads.to_string_lossy())?;
+        state.serialize_field("cacheDownloads", &self.cache_downloads.to_string_lossy())?;
         state.serialize_field("logs", &self.logs.to_string_lossy())?;
-        state.serialize_field("config_file", &self.config_file.to_string_lossy())?;
-        state.serialize_field("db_file", &self.db_file.to_string_lossy())?;
+        state.serialize_field("configFile", &self.config_file.to_string_lossy())?;
+        state.serialize_field("dbFile", &self.db_file.to_string_lossy())?;
         state.end()
     }
 }

@@ -1,14 +1,31 @@
 {
-  "identifier": "app.talkr",
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
   "description": "Talkr - Free, private, offline speech tools",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "dialog:default",
     "opener:default",
     "log:default",
     "fs:default",
-    "fs:allow-appdata-read-recursive",
-    "fs:allow-appdata-write-recursive",
-    "fs:allow-home-read-recursive"
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$HOME/.talkr"
+        },
+        {
+          "path": "$HOME/.talkr/**"
+        }
+      ]
+    }
   ]
 }

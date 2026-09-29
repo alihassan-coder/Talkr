@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Talkr",
         "width": 1200,
         "height": 800,
@@ -21,7 +22,13 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/.talkr/audio/**"
+        ]
+      }
     }
   },
   "bundle": {
@@ -40,38 +47,20 @@
       }
     },
     "macOS": {
-      "entitlements": "entitlements.plist",
-      "exceptionDomain": "",
       "frameworks": [],
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libayatana-appindicator3-1", "librsvg2-common"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-common"
+        ]
       },
       "appimage": {
         "bundleMediaFramework": true
-      }
-    }
-  },
-  "plugins": {
-    "dialog": {
-      "open": true,
-      "save": true
-    },
-    "opener": {},
-    "log": {
-      "level": "info",
-      "file": true,
-      "filePath": "talkr.log"
-    },
-    "fs": {
-      "scope": {
-        "allow": [
-          "$APPDATA/*",
-          "$HOME/.talkr/*"
-        ]
       }
     }
   }

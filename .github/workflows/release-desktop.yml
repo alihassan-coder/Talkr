@@ -1,89 +1,104 @@
 name: Release Desktop
 
+# Push a tag like v0.1.0 to build installers on every platform and attach them
+# to a draft GitHub Release. Review the draft, then press Publish.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
-    name: Build ${{ matrix.os }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - name: Windows x64
+            os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: talkr-x64.msi
-          - os: macos-latest
+          - name: macOS Apple Silicon
+            os: macos-latest
             target: aarch64-apple-darwin
-            artifact: talkr-aarch64.dmg
-          - os: macos-latest
+          - name: macOS Intel
+            os: macos-latest
             target: x86_64-apple-darwin
-            artifact: talkr-x64.dmg
-          - os: ubuntu-22.04
+          - name: Linux x64
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact: talkr-x86_64.AppImage
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'pnpm'
+          node-version: 22
+          cache: pnpm
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      # whisper.cpp needs CMake + clang; cpal needs ALSA; Tauri needs WebKitGTK.
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libudev-dev patchelf
-
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install pkg-config
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build web (for catalog)
-        run: pnpm --filter web build
-
-      - name: Build desktop
+      - name: Build and upload installers
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
+          projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
-          releaseName: 'Talkr ${{ github.ref_name }}'
+          releaseName: Talkr ${{ github.ref_name }}
           releaseBody: |
-            See [CHANGELOG](https://github.com/talkr/talkr/blob/main/CHANGELOG.md) for details.
+            Free, private, offline speech tools. Text to speech with Kokoro and Piper, speech to text with Whisper, all running on your own computer.
+
+            **Which file do I need?**
+            - Windows: `*_x64-setup.exe` (recommended) or `*_x64_en-US.msi`
+            - macOS Apple Silicon: `*_aarch64.dmg`
+            - macOS Intel: `*_x64.dmg`
+            - Linux: `*.AppImage`, `*.deb` or `*.rpm`
+
+            Builds are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper will warn on first launch.
+            Checksums are listed in `SHA256SUMS-*.txt`.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
 
-      - name: Upload SHA256 checksums
-        if: always()
+      - name: Attach SHA-256 checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
-          find . -name "*.msi" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" | while read file; do
-            sha256sum "$file" > "$file.sha256"
-            echo "## $file" >> $GITHUB_STEP_SUMMARY
-            cat "$file.sha256" >> $GITHUB_STEP_SUMMARY
-          done
+          out="SHA256SUMS-${{ matrix.target }}.txt"
+          find . -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+            | while read -r f; do
+                if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+              done | sed 's#  \./[^/]*/#  #' > "$out"
+          cat "$out" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload "${{ github.ref_name }}" "$out" --clobber --repo "${{ github.repository }}"

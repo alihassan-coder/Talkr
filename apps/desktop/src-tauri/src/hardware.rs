@@ -1,7 +1,6 @@
 use std::process::Command;
 use sysinfo::{System, CpuRefreshKind, MemoryRefreshKind};
 use serde::{Serialize, Deserialize};
-use crate::error::{AppError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,7 +89,7 @@ impl HardwareInfo {
                                     name: name.to_string(),
                                     vendor: GpuVendor::Apple,
                                     vram_bytes: display.get("spdisplays_vram").and_then(|v| v.as_str())
-                                        .and_then(|s| parse_vram(s)),
+                                        .and_then(parse_vram),
                                 });
                             }
                         }
@@ -99,7 +98,7 @@ impl HardwareInfo {
             }
         }
 
-        if let Ok(output) = Command::new("nvidia-smi")
+        if let Ok(output) = hidden_command("nvidia-smi")
             .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
             .output()
         {
@@ -117,7 +116,12 @@ impl HardwareInfo {
             }
         }
 
-        if gpus.is_empty() && cfg!(not(target_os = "macos")) {
+        #[cfg(target_os = "windows")]
+        if gpus.is_empty() {
+            gpus.extend(Self::detect_gpus_windows());
+        }
+
+        if gpus.is_empty() && cfg!(target_os = "linux") {
             if let Ok(output) = Command::new("lspci")
                 .args(["-nn"])
                 .output()
@@ -151,21 +155,61 @@ impl HardwareInfo {
         gpus
     }
 
+    #[cfg(target_os = "windows")]
+    fn detect_gpus_windows() -> Vec<GpuInfo> {
+        let mut gpus = Vec::new();
+        let output = hidden_command("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterCompatibility,AdapterRAM | ConvertTo-Json -Compress",
+            ])
+            .output();
+        let Ok(output) = output else { return gpus };
+        let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return gpus };
+        let entries = match json {
+            serde_json::Value::Array(a) => a,
+            v @ serde_json::Value::Object(_) => vec![v],
+            _ => return gpus,
+        };
+        for entry in entries {
+            let name = entry.get("Name").and_then(|v| v.as_str()).unwrap_or("Unknown GPU").to_string();
+            let vendor_str = format!(
+                "{} {}",
+                entry.get("AdapterCompatibility").and_then(|v| v.as_str()).unwrap_or(""),
+                name
+            )
+            .to_lowercase();
+            let vendor = if vendor_str.contains("nvidia") {
+                GpuVendor::Nvidia
+            } else if vendor_str.contains("amd") || vendor_str.contains("advanced micro") || vendor_str.contains("radeon") {
+                GpuVendor::Amd
+            } else if vendor_str.contains("intel") {
+                GpuVendor::Intel
+            } else {
+                GpuVendor::Unknown
+            };
+            // AdapterRAM is a 32-bit field and saturates at 4 GiB, so treat it as a lower bound.
+            let vram_bytes = entry.get("AdapterRAM").and_then(|v| v.as_u64()).filter(|v| *v > 0);
+            gpus.push(GpuInfo { name, vendor, vram_bytes });
+        }
+        gpus
+    }
+
+    #[allow(unused_variables)]
     fn recommend_backend(os: &str, gpus: &[GpuInfo]) -> Backend {
         if os == "macos" {
             return Backend::Metal;
         }
 
-        let has_nvidia = gpus.iter().any(|g| g.vendor == GpuVendor::Nvidia);
-        let has_vulkan = gpus.iter().any(|g| g.vendor != GpuVendor::Unknown);
-
         #[cfg(feature = "cuda")]
-        if has_nvidia {
+        if gpus.iter().any(|g| g.vendor == GpuVendor::Nvidia) {
             return Backend::Cuda;
         }
 
         #[cfg(feature = "vulkan")]
-        if has_vulkan {
+        if gpus.iter().any(|g| g.vendor != GpuVendor::Unknown) {
             return Backend::Vulkan;
         }
 
@@ -173,12 +217,25 @@ impl HardwareInfo {
     }
 }
 
+/// Builds a `Command` that does not flash a console window on Windows.
+fn hidden_command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 fn parse_vram(s: &str) -> Option<u64> {
     let s = s.trim();
-    if s.ends_with(" GB") {
-        s[..s.len() - 3].parse::<f64>().ok().map(|v| (v * 1024.0 * 1024.0 * 1024.0) as u64)
-    } else if s.ends_with(" MB") {
-        s[..s.len() - 3].parse::<u64>().ok().map(|v| v * 1024 * 1024)
+    if let Some(gb) = s.strip_suffix(" GB") {
+        gb.parse::<f64>().ok().map(|v| (v * 1024.0 * 1024.0 * 1024.0) as u64)
+    } else if let Some(mb) = s.strip_suffix(" MB") {
+        mb.parse::<u64>().ok().map(|v| v * 1024 * 1024)
     } else {
         None
     }

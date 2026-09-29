@@ -1,10 +1,9 @@
-use std::path::Path;
 use std::fs;
 use serde::{Deserialize, Serialize};
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub version: u32,
     pub device: DevicePreference,

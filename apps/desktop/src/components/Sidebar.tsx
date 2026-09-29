@@ -1,50 +1,56 @@
-import { NavLink } from 'react-router-dom'
-import { Mic, Mic2, History, Download, Settings, Volume2, ChevronLeft } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { NavLink } from 'react-router'
+import { Boxes, History, Mic, Settings, Volume2 } from 'lucide-react'
+import { LogoMark } from '@/components/Logo'
+import { Kbd } from '@/components/ui'
+import { cx } from '@/lib/cx'
 
-const navItems = [
-  { path: '/speak', label: 'Speak', icon: Volume2 },
-  { path: '/transcribe', label: 'Transcribe', icon: Mic },
-  { path: '/history', label: 'History', icon: History },
-  { path: '/models', label: 'Models', icon: Download },
-] as const
+const primary = [
+  { to: '/speak', label: 'Speak', icon: Volume2, key: '1' },
+  { to: '/transcribe', label: 'Transcribe', icon: Mic, key: '2' },
+  { to: '/models', label: 'Models', icon: Boxes, key: '3' },
+  { to: '/history', label: 'History', icon: History, key: '4' },
+]
 
-export function Sidebar() {
+function Item({ to, icon: Icon, label, shortcut }: { to: string; icon: typeof Mic; label: string; shortcut?: string }) {
   return (
-    <aside className="w-60 bg-card border-r border-border flex flex-col h-full">
-      <div className="p-6 border-b border-border">
-        <NavLink to="/speak" className="flex items-center gap-3 text-text-primary">
-          <Volume2 className="w-8 h-8 text-accent" strokeWidth={2} />
-          <span className="text-xl font-semibold tracking-tight">Talkr</span>
-        </NavLink>
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        cx(
+          'group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-200',
+          isActive ? 'bg-fg/[0.08] text-fg' : 'text-fg/50 hover:bg-fg/[0.04] hover:text-fg/85',
+        )
+      }
+    >
+      <Icon className="size-4" strokeWidth={1.75} />
+      <span className="flex-1">{label}</span>
+      {shortcut ? (
+        <span className="opacity-0 transition-opacity group-hover:opacity-100">
+          <Kbd>Ctrl {shortcut}</Kbd>
+        </span>
+      ) : null}
+    </NavLink>
+  )
+}
+
+export function Sidebar({ footer }: { footer?: ReactNode }) {
+  return (
+    <aside className="flex w-56 shrink-0 flex-col border-r border-fg/[0.08] bg-fg/[0.015] p-3">
+      <div className="flex items-center gap-2 px-2 pb-5 pt-1.5">
+        <LogoMark className="size-5" />
+        <span className="text-sm font-semibold tracking-[-0.02em]">Talkr</span>
       </div>
 
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon }) => (
-          <NavLink
-            key={path}
-            to={path}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-input)] text-text-secondary transition-colors ${
-                isActive
-                  ? 'bg-accent-soft text-accent font-medium'
-                  : 'hover:bg-app-canvas hover:text-text-primary'
-              }`
-            }
-          >
-            <Icon className="w-5 h-5 stroke-[1.75] flex-shrink-0" />
-            <span>{label}</span>
-          </NavLink>
+      <nav aria-label="Main" className="space-y-0.5">
+        {primary.map((item) => (
+          <Item key={item.to} to={item.to} icon={item.icon} label={item.label} shortcut={item.key} />
         ))}
       </nav>
 
-      <div className="p-4 border-t border-border">
-        <NavLink
-          to="/settings"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-input)] text-text-secondary transition-colors hover:bg-app-canvas hover:text-text-primary"
-        >
-          <Settings className="w-5 h-5 stroke-[1.75] flex-shrink-0" />
-          <span>Settings</span>
-        </NavLink>
+      <div className="mt-auto space-y-3">
+        {footer}
+        <Item to="/settings" icon={Settings} label="Settings" shortcut="," />
       </div>
     </aside>
   )

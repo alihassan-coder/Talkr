@@ -1,93 +1,121 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
+/*
+  Same two colours as the website: `bg` and `fg`. The default palette is off,
+  so every tint is an opacity of one of them. Fonts are bundled, not fetched:
+  the app has to look right with the network unplugged.
+*/
 @theme {
-  --color-bg-primary: #FFFFFF;
-  --color-bg-canvas: #F7F7FA;
-  --color-bg-card: #FFFFFF;
+  --color-*: initial;
+  --color-bg: #0b0b0c;
+  --color-fg: #ededea;
 
-  --color-text-primary: #0F1115;
-  --color-text-secondary: #5B6070;
-  --color-text-muted: #9AA0AE;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  --color-accent: #5B5BF7;
-  --color-accent-hover: #4A4AE6;
-  --color-accent-soft: #EEEEFF;
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --color-success: #16C79A;
-  --color-success-soft: #E6FAF5;
+  --animate-rise: rise 0.5s var(--ease-out-quint) both;
+  --animate-caret: caret 1.1s steps(1) infinite;
+  --animate-level: level 0.9s ease-in-out infinite alternate;
+  --animate-shimmer: shimmer 1.6s linear infinite;
 
-  --color-warning: #F5A524;
-  --color-warning-soft: #FFF7E6;
-
-  --color-danger: #EF4444;
-  --color-danger-soft: #FEF2F2;
-
-  --color-border: #ECECF1;
-
-  --radius-card: 24px;
-  --radius-input: 14px;
-  --radius-pill: 9999px;
-
-  --shadow-soft: 0 1px 2px rgba(16,17,21,0.04), 0 8px 24px rgba(16,17,21,0.06);
-  --shadow-card: 0 1px 2px rgba(16,17,21,0.04), 0 4px 12px rgba(16,17,21,0.05);
-
-  --font-sans: "Inter Variable", system-ui, sans-serif;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html, body, #root {
-  height: 100%;
-  width: 100%;
-}
-
-body {
-  font-family: var(--font-sans);
-  background-color: var(--color-bg-canvas);
-  color: var(--color-text-primary);
-  font-size: 15px;
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.01em;
-}
-
-::selection {
-  background-color: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes caret {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  @keyframes level {
+    from { transform: scaleY(0.2); }
+    to { transform: scaleY(1); }
+  }
+  @keyframes shimmer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
   }
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+  html {
+    color-scheme: dark;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-::-webkit-scrollbar-thumb {
-  background-color: var(--color-border);
-  border-radius: 4px;
-}
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+  }
 
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-text-muted);
+  /* Text people might want to copy stays selectable. */
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+    cursor: auto;
+  }
+
+  ::selection {
+    background-color: var(--color-fg);
+    color: var(--color-bg);
+  }
+
+  :focus-visible {
+    outline: 1.5px solid var(--color-fg);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for] {
+    cursor: pointer;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+    background-color: color-mix(in oklab, var(--color-fg) 12%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--color-fg) 22%, transparent);
+  }
+
+  input[type="range"] {
+    accent-color: var(--color-fg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }

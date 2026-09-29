@@ -1,39 +1,44 @@
+use serde::Serialize;
 use tauri::{command, State};
-use crate::lib::AppState;
-use crate::error::{AppError, Result};
+use crate::commands::remove_owned_audio;
 use crate::db::prune_old_history;
-use crate::paths::AppPaths;
+use crate::error::Result;
+use crate::AppState;
 
-#[command]
-pub async fn get_storage_usage(state: State<'_, AppState>) -> Result<StorageUsage> {
-    let paths = &state.paths;
-
-    let models_size = dir_size(&paths.models)?;
-    let audio_size = dir_size(&paths.audio)?;
-    let db_size = paths.db_file.metadata().map(|m| m.len()).unwrap_or(0);
-
-    Ok(StorageUsage {
-        models_bytes: models_size,
-        audio_bytes: audio_size,
-        db_bytes: db_size,
-        total_bytes: models_size + audio_size + db_size,
-    })
-}
-
-#[command]
-pub async fn run_retention(state: State<'_, AppState>) -> Result<usize> {
-    let settings = state.settings.lock().unwrap();
-    let deleted = prune_old_history(&state.paths, settings.history_retention_days)?;
-    Ok(deleted)
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageUsage {
     pub models_bytes: u64,
     pub audio_bytes: u64,
     pub db_bytes: u64,
     pub total_bytes: u64,
+}
+
+#[command]
+pub async fn get_storage_usage(state: State<'_, AppState>) -> Result<StorageUsage> {
+    let paths = state.paths.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let models_bytes = dir_size(&paths.models)?;
+        let audio_bytes = dir_size(&paths.audio)?;
+        // Include SQLite WAL/SHM side files.
+        let db_bytes = dir_size(&paths.history)?;
+        Ok(StorageUsage {
+            models_bytes,
+            audio_bytes,
+            db_bytes,
+            total_bytes: models_bytes + audio_bytes + db_bytes,
+        })
+    })
+    .await?
+}
+
+/// Apply the history retention policy now. Returns the number of deleted items.
+#[command]
+pub async fn run_retention(state: State<'_, AppState>) -> Result<usize> {
+    let days = state.settings().history_retention_days;
+    let deleted = prune_old_history(&state.paths, days)?;
+    remove_owned_audio(&state.paths, &deleted.audio_paths);
+    Ok(deleted.count)
 }
 
 fn dir_size(path: &std::path::Path) -> Result<u64> {

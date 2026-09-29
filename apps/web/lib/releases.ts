@@ -1,10 +1,11 @@
 export const VERSION = '0.1.0'
-export const REPO_URL = 'https://github.com/talkr/talkr'
+export const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 export const RELEASES_URL = `${REPO_URL}/releases`
 export const ISSUES_URL = `${REPO_URL}/issues`
 export const CONTACT_EMAIL = 'hello@talkr.app'
 
-export const downloadUrl = (file: string) => `${RELEASES_URL}/latest/download/${file}`
+/** Tauri puts the version in every file name, so links are pinned to this version's tag. */
+export const downloadUrl = (file: string) => `${RELEASES_URL}/download/v${VERSION}/${file}`
 
 export type ReleaseFile = {
   name: string
@@ -28,8 +29,8 @@ export const platforms: Platform[] = [
     detail: '10 and 11',
     requirement: 'Windows 10 or later, x64',
     files: [
-      { name: 'talkr-x64.msi', format: 'Installer', arch: 'x64', size: '~120 MB' },
-      { name: 'talkr-x64.exe', format: 'Portable', arch: 'x64', size: '~115 MB' },
+      { name: `Talkr_${VERSION}_x64-setup.exe`, format: 'Installer', arch: 'x64', size: '~120 MB' },
+      { name: `Talkr_${VERSION}_x64_en-US.msi`, format: 'MSI package', arch: 'x64', size: '~120 MB' },
     ],
   },
   {
@@ -37,14 +38,14 @@ export const platforms: Platform[] = [
     name: 'macOS',
     detail: 'Apple Silicon',
     requirement: 'macOS 11 or later, M1 and newer',
-    files: [{ name: 'talkr-aarch64.dmg', format: 'Disk image', arch: 'arm64', size: '~110 MB' }],
+    files: [{ name: `Talkr_${VERSION}_aarch64.dmg`, format: 'Disk image', arch: 'arm64', size: '~110 MB' }],
   },
   {
     id: 'macos-intel',
     name: 'macOS',
     detail: 'Intel',
     requirement: 'macOS 11 or later, Intel Macs',
-    files: [{ name: 'talkr-x64.dmg', format: 'Disk image', arch: 'x64', size: '~110 MB' }],
+    files: [{ name: `Talkr_${VERSION}_x64.dmg`, format: 'Disk image', arch: 'x64', size: '~110 MB' }],
   },
   {
     id: 'linux',
@@ -52,9 +53,9 @@ export const platforms: Platform[] = [
     detail: 'x86_64',
     requirement: 'glibc 2.31 or later',
     files: [
-      { name: 'talkr-x86_64.AppImage', format: 'AppImage', arch: 'x86_64', size: '~115 MB' },
-      { name: 'talkr-x86_64.deb', format: 'Debian, Ubuntu', arch: 'x86_64', size: '~115 MB' },
-      { name: 'talkr-x86_64.rpm', format: 'Fedora, openSUSE', arch: 'x86_64', size: '~115 MB' },
+      { name: `Talkr_${VERSION}_amd64.AppImage`, format: 'AppImage', arch: 'x86_64', size: '~115 MB' },
+      { name: `Talkr_${VERSION}_amd64.deb`, format: 'Debian, Ubuntu', arch: 'x86_64', size: '~115 MB' },
+      { name: `Talkr-${VERSION}-1.x86_64.rpm`, format: 'Fedora, openSUSE', arch: 'x86_64', size: '~115 MB' },
     ],
   },
 ]

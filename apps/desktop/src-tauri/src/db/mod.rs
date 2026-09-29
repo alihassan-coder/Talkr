@@ -1,20 +1,17 @@
 use rusqlite::{Connection, params, OptionalExtension};
-use std::path::Path;
-use tauri::Manager;
-use crate::error::{AppError, Result};
+use serde::{Deserialize, Serialize};
+use crate::error::Result;
 
-pub fn init(app: &tauri::AppHandle) -> Result<()> {
-    let paths = app.state::<crate::lib::AppState>().paths.clone();
-    let db_path = &paths.db_file;
+const SCHEMA_VERSION: i32 = 1;
 
-    let conn = Connection::open(db_path)?;
+/// Create the database (if needed) and run migrations.
+pub fn init(paths: &crate::paths::AppPaths) -> Result<()> {
+    let conn = get_connection(paths)?;
 
-    conn.execute_batch(include_str!("schema.sql"))?;
-
-    let mut user_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if user_version < 1 {
+    let user_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if user_version < SCHEMA_VERSION {
         run_migrations(&conn, user_version)?;
-        conn.execute("PRAGMA user_version = 1", [])?;
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
     Ok(())
@@ -29,9 +26,21 @@ fn run_migrations(conn: &Connection, from_version: i32) -> Result<()> {
 
 pub fn get_connection(paths: &crate::paths::AppPaths) -> Result<Connection> {
     let conn = Connection::open(&paths.db_file)?;
-    conn.execute("PRAGMA journal_mode = WAL", [])?;
-    conn.execute("PRAGMA foreign_keys = ON", [])?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
+}
+
+/// Turn free-form user input into a safe FTS5 query: each word becomes a quoted prefix term.
+fn fts_query(q: &str) -> Option<String> {
+    let terms: Vec<String> = q
+        .split_whitespace()
+        .map(|t| t.replace('"', ""))
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{}\"*", t))
+        .collect();
+    (!terms.is_empty()).then(|| terms.join(" "))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +119,7 @@ pub fn list_history(
         params_vec.push(Box::new(cursor_ts));
     }
 
-    if let Some(q) = query {
+    if let Some(q) = query.as_deref().and_then(fts_query) {
         where_clauses.push("rowid IN (SELECT rowid FROM history_fts WHERE history_fts MATCH ?)");
         params_vec.push(Box::new(q));
     }
@@ -164,14 +173,12 @@ pub fn list_history(
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
+    let mut items = items;
     let has_more = items.len() > limit;
-    let items = if has_more { &items[..limit] } else { &items };
-    let next_cursor = items.last().map(|i| i.created_at);
+    items.truncate(limit);
+    let next_cursor = if has_more { items.last().map(|i| i.created_at) } else { None };
 
-    Ok(HistoryListResult {
-        items: items.to_vec(),
-        next_cursor,
-    })
+    Ok(HistoryListResult { items, next_cursor })
 }
 
 pub fn get_history(paths: &crate::paths::AppPaths, id: &str) -> Result<Option<HistoryItem>> {
@@ -220,21 +227,36 @@ pub fn toggle_favorite(paths: &crate::paths::AppPaths, id: &str) -> Result<bool>
     Ok(new != 0)
 }
 
-pub fn clear_history(paths: &crate::paths::AppPaths) -> Result<usize> {
-    let conn = get_connection(paths)?;
-    let deleted = conn.execute("DELETE FROM history WHERE favorite = 0", [])?;
-    Ok(deleted)
+/// Result of a bulk delete: number of rows removed and the audio paths they referenced
+/// (so callers can remove the files).
+pub struct DeletedRows {
+    pub count: usize,
+    pub audio_paths: Vec<String>,
 }
 
-pub fn prune_old_history(paths: &crate::paths::AppPaths, retention_days: u32) -> Result<usize> {
+/// Delete all non-favorite items.
+pub fn clear_history(paths: &crate::paths::AppPaths) -> Result<DeletedRows> {
+    delete_where(paths, "favorite = 0", params![])
+}
+
+/// Delete non-favorite items older than `retention_days` (0 = keep forever).
+pub fn prune_old_history(paths: &crate::paths::AppPaths, retention_days: u32) -> Result<DeletedRows> {
     if retention_days == 0 {
-        return Ok(0);
+        return Ok(DeletedRows { count: 0, audio_paths: Vec::new() });
     }
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
-    let conn = get_connection(paths)?;
-    let deleted = conn.execute(
-        "DELETE FROM history WHERE created_at < ?1 AND favorite = 0",
-        params![cutoff.timestamp_millis()],
-    )?;
-    Ok(deleted)
+    delete_where(paths, "created_at < ?1 AND favorite = 0", params![cutoff.timestamp_millis()])
+}
+
+fn delete_where(paths: &crate::paths::AppPaths, where_sql: &str, args: &[&dyn rusqlite::ToSql]) -> Result<DeletedRows> {
+    let mut conn = get_connection(paths)?;
+    let tx = conn.transaction()?;
+    let audio_paths = {
+        let mut stmt = tx.prepare(&format!("SELECT audio_path FROM history WHERE {} AND audio_path IS NOT NULL", where_sql))?;
+        let rows = stmt.query_map(args, |r| r.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let count = tx.execute(&format!("DELETE FROM history WHERE {}", where_sql), args)?;
+    tx.commit()?;
+    Ok(DeletedRows { count, audio_paths })
 }

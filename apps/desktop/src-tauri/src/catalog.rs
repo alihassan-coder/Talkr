@@ -1,7 +1,8 @@
-use std::path::Path;
 use std::fs;
+use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use crate::error::{AppError, Result};
+use crate::error::Result;
+use crate::paths::AppPaths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +26,10 @@ pub struct CatalogModel {
     pub homepage: String,
     pub files: Vec<ModelFile>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub installed: bool,
+    #[serde(default)]
+    pub installed_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,6 +37,23 @@ pub struct CatalogModel {
 pub enum ModelKind {
     Stt,
     Tts,
+}
+
+impl ModelKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ModelKind::Stt => "stt",
+            ModelKind::Tts => "tts",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "stt" => Some(ModelKind::Stt),
+            "tts" => Some(ModelKind::Tts),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,9 +87,17 @@ pub struct ModelManifest {
     pub files: Vec<String>,
 }
 
+impl ModelManifest {
+    pub fn read(dir: &std::path::Path) -> Option<Self> {
+        fs::read_to_string(dir.join("manifest.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    }
+}
+
 impl Catalog {
     pub fn load_embedded() -> Result<Self> {
-        let json = include_str!("../../catalog.json");
+        let json = include_str!("../../../../packages/model-catalog/catalog.json");
         let catalog: Catalog = serde_json::from_str(json)?;
         Ok(catalog)
     }
@@ -75,38 +105,18 @@ impl Catalog {
     pub fn get_model(&self, id: &str) -> Option<&CatalogModel> {
         self.models.iter().find(|m| m.id == id)
     }
-
-    pub fn models_by_kind(&self, kind: ModelKind) -> Vec<&CatalogModel> {
-        self.models.iter().filter(|m| m.kind == kind).collect()
-    }
 }
 
 impl CatalogModel {
-    pub fn is_installed(&self, paths: &crate::paths::AppPaths) -> bool {
-        let model_dir = paths.model_dir(
-            match self.kind {
-                ModelKind::Stt => "stt",
-                ModelKind::Tts => "tts",
-            },
-            &self.id
-        );
-        model_dir.join("manifest.json").exists()
+    pub fn dir(&self, paths: &AppPaths) -> PathBuf {
+        paths.model_dir(self.kind.as_str(), &self.id)
     }
 
-    pub fn get_installed_manifest(&self, paths: &crate::paths::AppPaths) -> Option<ModelManifest> {
-        let manifest_path = paths.model_dir(
-            match self.kind {
-                ModelKind::Stt => "stt",
-                ModelKind::Tts => "tts",
-            },
-            &self.id
-        ).join("manifest.json");
+    pub fn is_installed(&self, paths: &AppPaths) -> bool {
+        self.dir(paths).join("manifest.json").exists()
+    }
 
-        if manifest_path.exists() {
-            fs::read_to_string(manifest_path).ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-        } else {
-            None
-        }
+    pub fn get_installed_manifest(&self, paths: &AppPaths) -> Option<ModelManifest> {
+        ModelManifest::read(&self.dir(paths))
     }
 }

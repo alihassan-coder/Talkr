@@ -2,13 +2,14 @@
   "name": "talkr",
   "private": true,
   "scripts": {
-    "dev:desktop": "turbo run dev --filter=desktop",
+    "dev:desktop": "pnpm --filter desktop app",
     "dev:web": "turbo run dev --filter=web",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "catalog:validate": "pnpm --filter=model-catalog run validate",
-    "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\""
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\"",
+    "build:desktop": "pnpm --filter desktop app:build"
   },
   "devDependencies": {
     "turbo": "^2.1.0",

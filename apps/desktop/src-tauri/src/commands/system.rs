@@ -1,18 +1,10 @@
-use tauri::{command, State, AppHandle, Emitter};
-use crate::lib::AppState;
+use tauri::{command, AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
+use crate::config::{PartialSettings, Settings};
 use crate::error::{AppError, Result};
 use crate::hardware::HardwareInfo;
 use crate::paths::AppPaths;
-use crate::config::Settings;
-use crate::catalog::{Catalog, CatalogModel, ModelKind, InstalledModel, ModelManifest};
-use crate::downloader::{DownloadManager, DownloadProgress, DownloadState, DownloadJob};
-use crate::engines::{EngineRegistry, SttOptions, TtsOptions};
-use crate::audio::{record, decode, resample, wav};
-use crate::db::{insert_history, list_history, get_history, delete_history, toggle_favorite, clear_history, prune_old_history, HistoryItem, HistoryKind, HistoryListResult};
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use uuid::Uuid;
-use chrono::Utc;
+use crate::AppState;
 
 #[command]
 pub async fn get_hardware_info(state: State<'_, AppState>) -> Result<HardwareInfo> {
@@ -26,21 +18,28 @@ pub async fn get_app_paths(state: State<'_, AppState>) -> Result<AppPaths> {
 
 #[command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
-    let settings = state.settings.lock().unwrap();
-    Ok(settings.clone())
+    Ok(state.settings().clone())
 }
 
 #[command]
-pub async fn update_settings(state: State<'_, AppState>, patch: crate::config::PartialSettings) -> Result<Settings> {
-    let mut settings = state.settings.lock().unwrap();
-    settings.merge(patch);
-    settings.save(&state.paths)?;
-    Ok(settings.clone())
+pub async fn update_settings(state: State<'_, AppState>, settings: PartialSettings) -> Result<Settings> {
+    let patch = settings;
+    if let Some(rate) = patch.speech_rate {
+        if !(0.25..=4.0).contains(&rate) {
+            return Err(AppError::Validation("speechRate must be between 0.25 and 4.0".into()));
+        }
+    }
+    let mut current = state.settings();
+    let mut updated = current.clone();
+    updated.merge(patch);
+    updated.save(&state.paths)?;
+    *current = updated.clone();
+    Ok(updated)
 }
 
 #[command]
 pub async fn open_data_folder(state: State<'_, AppState>, app: AppHandle) -> Result<()> {
-    let path = &state.paths.home;
+    let path = state.paths.home.to_string_lossy().to_string();
     app.opener().open_path(path, None::<&str>)?;
     Ok(())
 }

@@ -89,7 +89,7 @@ const handles = [
       <>
         The code is MIT licensed. You can audit it, build it yourself or contribute at{' '}
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className={link}>
-          github.com/talkr/talkr
+          github.com/alihassan-coder/Talkr
         </a>
         .
       </>

@@ -1,25 +1,33 @@
+import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from 'path'
+import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
 
+const host = process.env.TAURI_DEV_HOST
+const debug = Boolean(process.env.TAURI_ENV_DEBUG)
+
+// Follows the Tauri 2 Vite template: fixed port, no screen clearing, src-tauri ignored by the watcher.
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@talkr/ui': path.resolve(__dirname, '../../packages/ui/src'),
-      '@talkr/model-catalog': path.resolve(__dirname, '../../packages/model-catalog'),
-      '@talkr/config': path.resolve(__dirname, '../../packages/config')
-    }
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
   },
-  build: {
-    outDir: 'dist',
-    sourcemap: true
-  },
+  clearScreen: false,
   server: {
     port: 1420,
-    strictPort: true
+    strictPort: true,
+    host: host || false,
+    hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
+    watch: { ignored: ['**/src-tauri/**'] },
   },
-  envPrefix: ['VITE_', 'TAURI_']
+  envPrefix: ['VITE_', 'TAURI_ENV_'],
+  build: {
+    outDir: 'dist',
+    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome110' : 'safari15',
+    minify: !debug,
+    sourcemap: debug,
+  },
 })

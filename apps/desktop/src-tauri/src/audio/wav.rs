@@ -1,7 +1,6 @@
 use hound::{WavSpec, WavWriter};
-use std::fs::File;
 use std::path::Path;
-use crate::error::{AppError, Result};
+use crate::error::Result;
 
 pub fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
     let spec = WavSpec {
@@ -21,8 +20,4 @@ pub fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
 
     writer.finalize()?;
     Ok(())
-}
-
-pub fn write_wav_from_buffer(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
-    write_wav(path, samples, sample_rate)
 }

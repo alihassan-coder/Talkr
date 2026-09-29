@@ -1,13 +1,14 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
-import App from './App'
-import './styles/globals.css'
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { HashRouter } from 'react-router'
+import { App } from '@/App'
+import '@/styles/globals.css'
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <BrowserRouter>
+// Hash routing: the bundled app is served from a custom protocol, so there is no server to rewrite deep links.
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <HashRouter>
       <App />
-    </BrowserRouter>
-  </React.StrictMode>
+    </HashRouter>
+  </StrictMode>,
 )

@@ -1,84 +1,105 @@
-use tauri::{command, State, AppHandle, Emitter};
-use crate::lib::AppState;
-use crate::error::{AppError, Result};
-use crate::engines::{EngineRegistry, SttOptions, Transcript};
-use crate::audio::{record, decode, resample, wav};
-use crate::db::{insert_history, HistoryItem, HistoryKind};
-use crate::paths::AppPaths;
-use std::sync::{Arc, Mutex};
-use uuid::Uuid;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Duration;
 use chrono::Utc;
+use serde::Serialize;
+use tauri::{command, AppHandle, Emitter, Manager, State};
+use uuid::Uuid;
+use crate::audio::{decode, resample, wav};
+use crate::catalog::ModelKind;
+use crate::commands::models::locate_model;
+use crate::commands::tts::make_title;
+use crate::commands::{finish_job, job_control, resolve_path, to_stored_path, EVENT_MIC_LEVEL, EVENT_STT_DONE};
+use crate::db::{insert_history, HistoryItem, HistoryKind};
+use crate::engines::stt_whisper::WhisperEngine;
+use crate::engines::{JobControl, SttEngine, SttOptions};
+use crate::error::{AppError, Result};
+use crate::AppState;
 
-type EngineRegistryState = Arc<Mutex<Option<EngineRegistry>>>;
-
-fn get_engine_registry(state: &State<'_, AppState>) -> Arc<Mutex<EngineRegistry>> {
-    let mut guard = state.try_get::<EngineRegistryState>().expect("EngineRegistry not initialized");
-    let mut registry_opt = guard.lock().unwrap();
-    if registry_opt.is_none() {
-        *registry_opt = Some(EngineRegistry::new());
-    }
-    Arc::new(Mutex::new(registry_opt.as_ref().unwrap().clone()))
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingResult {
+    /// Path of the saved WAV, relative to the Talkr home (pass it to `transcribe_file`).
+    pub temp_audio_path: String,
+    pub duration_ms: i64,
 }
 
-type RecorderState = Arc<Mutex<Option<crate::audio::record::AudioRecorder>>>;
-
-fn get_recorder(state: &State<'_, AppState>) -> Arc<Mutex<crate::audio::record::AudioRecorder>> {
-    let mut guard = state.try_get::<RecorderState>().expect("Recorder not initialized");
-    let mut recorder_opt = guard.lock().unwrap();
-    if recorder_opt.is_none() {
-        *recorder_opt = Some(crate::audio::record::AudioRecorder::new().unwrap());
+/// Get the cached STT engine for `model_id`, loading it if needed. Blocking.
+pub(crate) fn load_stt(state: &AppState, model_id: &str) -> Result<Arc<dyn SttEngine>> {
+    let mut engines = state.engines();
+    if let Some(engine) = engines.get_stt(model_id) {
+        return Ok(engine);
     }
-    Arc::new(Mutex::new(recorder_opt.as_ref().unwrap().clone()))
+    let (kind, dir) = locate_model(&state.paths, model_id)
+        .filter(|(_, dir)| dir.join("manifest.json").is_file())
+        .ok_or_else(|| AppError::NotFound(format!("Model not installed: {}", model_id)))?;
+    if kind != ModelKind::Stt {
+        return Err(AppError::Validation(format!("{} is not a speech-to-text model", model_id)));
+    }
+    let engine: Arc<dyn SttEngine> = Arc::new(WhisperEngine::new(&dir, model_id.to_string())?);
+    engines.set_stt(engine.clone());
+    Ok(engine)
 }
 
+/// Start recording from the default microphone. Emits `mic://level` (RMS, 0..1) ~20x/s.
 #[command]
 pub async fn start_recording(state: State<'_, AppState>, app: AppHandle) -> Result<()> {
-    let recorder = get_recorder(&state);
-    let mut recorder = recorder.lock().unwrap();
-    recorder.start()?;
+    let (recording, level) = {
+        let mut recorder = state.recorder();
+        recorder.start()?;
+        (recorder.recording_flag(), recorder.level_handle())
+    };
 
-    let level_rx = recorder.get_level_receiver();
-    let app_handle = app.clone();
-
-    tokio::spawn(async move {
-        while let Ok(level) = level_rx.recv_async().await {
-            let _ = app_handle.emit("mic://level", level);
+    tauri::async_runtime::spawn(async move {
+        while recording.load(Ordering::Relaxed) {
+            let _ = app.emit(EVENT_MIC_LEVEL, f32::from_bits(level.load(Ordering::Relaxed)));
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
+        let _ = app.emit(EVENT_MIC_LEVEL, 0.0f32);
     });
 
     Ok(())
 }
 
+/// Stop recording and save the audio as a WAV file under `~/.talkr/audio`.
 #[command]
-pub async fn stop_recording(state: State<'_, AppState>) -> Result<serde_json::Value> {
-    let recorder = get_recorder(&state);
-    let mut recorder = recorder.lock().unwrap();
-    let samples = recorder.stop()?;
+pub async fn stop_recording(state: State<'_, AppState>) -> Result<RecordingResult> {
+    let (samples, sample_rate) = {
+        let mut recorder = state.recorder();
+        let samples = recorder.stop()?;
+        (samples, recorder.sample_rate())
+    };
 
-    let sample_rate = recorder.sample_rate();
-    let duration_ms = (samples.len() as f32 / sample_rate as f32 * 1000.0) as i64;
+    if samples.is_empty() {
+        return Err(AppError::Audio("No audio was captured".into()));
+    }
+
+    let duration_ms = (samples.len() as f64 / sample_rate as f64 * 1000.0) as i64;
 
     let paths = state.paths.clone();
     let audio_path = paths.audio_path("wav");
-    std::fs::create_dir_all(audio_path.parent().unwrap())?;
-    wav::write_wav(&audio_path, &samples, sample_rate)?;
+    if let Some(parent) = audio_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let write_path = audio_path.clone();
+    tauri::async_runtime::spawn_blocking(move || wav::write_wav(&write_path, &samples, sample_rate)).await??;
 
-    let rel_path = audio_path.strip_prefix(&paths.home).unwrap().to_string_lossy().to_string();
-
-    Ok(serde_json::json!({
-        "tempAudioPath": rel_path,
-        "durationMs": duration_ms
-    }))
+    Ok(RecordingResult {
+        temp_audio_path: to_stored_path(&paths, &audio_path),
+        duration_ms,
+    })
 }
 
+/// Current microphone RMS level (0 when not recording).
 #[command]
 pub async fn get_input_level(state: State<'_, AppState>) -> Result<f32> {
-    let recorder = get_recorder(&state);
-    let recorder = recorder.lock().unwrap();
-    let level_rx = recorder.get_level_receiver();
-    Ok(level_rx.try_recv().unwrap_or(0.0))
+    Ok(state.recorder().level())
 }
 
+/// Start a transcription job for an audio file (absolute path, or a path relative to the Talkr
+/// home such as the one returned by `stop_recording`). `language` defaults to the settings value;
+/// `translate` = translate to English (multilingual models only).
+/// Completion is reported through `stt://done` (or `job://error`), progress through `job://progress`.
 #[command]
 pub async fn transcribe_file(
     state: State<'_, AppState>,
@@ -86,75 +107,111 @@ pub async fn transcribe_file(
     path: String,
     model_id: String,
     language: Option<String>,
+    translate: Option<bool>,
 ) -> Result<String> {
-    let job_id = Uuid::new_v4().to_string();
-
-    let registry = get_engine_registry(&state);
-    let mut registry = registry.lock().unwrap();
-
-    if registry.get_stt().is_none() || registry.get_stt().as_ref().unwrap().model_id() != model_id {
-        let catalog = crate::catalog::Catalog::load_embedded()?;
-        let model = catalog.get_model(&model_id)
-            .ok_or_else(|| AppError::NotFound(format!("Model not found: {}", model_id)))?;
-
-        let model_dir = state.paths.model_dir("stt", &model_id);
-        let model_file = model_dir.join(format!("ggml-{}.bin", model_id));
-        let engine = crate::engines::stt_whisper::WhisperEngine::new(&model_file, model_id.clone())?;
-        registry.set_stt(Arc::new(engine));
+    let full_path = resolve_path(&state.paths, &path);
+    if !full_path.is_file() {
+        return Err(AppError::NotFound(format!("Audio file not found: {}", path)));
     }
 
-    let stt = registry.get_stt().ok_or_else(|| AppError::Engine("STT engine not loaded".into()))?;
-    let stt = stt.clone();
-    drop(registry);
+    let (language, save_recordings) = {
+        let settings = state.settings();
+        (language.unwrap_or_else(|| settings.stt_language.clone()), settings.save_recordings)
+    };
 
-    let paths = state.paths.clone();
-    let app_handle = app.clone();
+    let job_id = Uuid::new_v4().to_string();
+    let cancel = state.jobs.register(&job_id);
+    let ctl = job_control(&app, &job_id, cancel);
 
-    tokio::task::spawn_blocking(move || {
-        let start = std::time::Instant::now();
-
-        let full_path = paths.home.join(&path);
-        let (samples, sample_rate) = decode::decode_audio_file(&full_path)?;
-        let samples = resample::resample_to_16k_mono(&samples, sample_rate)?;
-
-        let transcript = stt.transcribe(&samples, &SttOptions { language, translate: false }, &|p| {
-            let _ = app_handle.emit("job://progress", serde_json::json!({ "jobId": job_id, "progress": p }));
-        })?;
-
-        let duration_ms = (samples.len() as f32 / 16000.0 * 1000.0) as i64;
-        let title = transcript.text.chars().take(60).collect::<String>();
-
-        let item = HistoryItem {
-            id: job_id.clone(),
-            kind: HistoryKind::Stt,
-            created_at: Utc::now().timestamp_millis(),
-            title,
-            text: transcript.text.clone(),
-            audio_path: Some(path.clone()),
-            duration_ms: Some(duration_ms),
-            model_id: model_id.clone(),
-            voice_id: None,
-            language: transcript.language,
-            device: "cpu".into(),
-            processing_ms: start.elapsed().as_millis() as i64,
-            favorite: false,
-            segments_json: Some(serde_json::to_string(&transcript.segments)?),
+    let job_app = app.clone();
+    let job = job_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = job_app.state::<AppState>();
+        let opts = SttOptions {
+            language: Some(language).filter(|l| !l.is_empty()),
+            translate: translate.unwrap_or(false),
+            threads: state.cpu_threads(),
         };
-
-        insert_history(&paths, &item)?;
-
-        let _ = app_handle.emit("stt://done", serde_json::json!({ "historyItem": item }));
-
-        Ok::<String, AppError>(job_id)
+        let result = run_transcription(&state, &ctl, &job, &full_path, &model_id, &opts, save_recordings);
+        finish_job(&job_app, &state, &job, EVENT_STT_DONE, result);
     });
 
     Ok(job_id)
 }
 
+fn run_transcription(
+    state: &AppState,
+    ctl: &JobControl,
+    job_id: &str,
+    full_path: &std::path::Path,
+    model_id: &str,
+    opts: &SttOptions,
+    save_recordings: bool,
+) -> Result<HistoryItem> {
+    let start = std::time::Instant::now();
+    ctl.progress(0.0);
+
+    let stt = load_stt(state, model_id)?;
+    if ctl.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    let (samples, sample_rate) = decode::decode_audio_file(full_path)?;
+    let samples = resample::resample_to_16k_mono(&samples, sample_rate)?;
+    if ctl.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    let transcript = stt.transcribe(&samples, opts, ctl)?;
+
+    let paths = &state.paths;
+    let duration_ms = (samples.len() as f64 / 16000.0 * 1000.0) as i64;
+    let is_own_recording = full_path.starts_with(&paths.audio);
+
+    // Recordings made in-app are discarded after transcription when the user opted out of keeping them.
+    let audio_path = if is_own_recording && !save_recordings {
+        std::fs::remove_file(full_path).ok();
+        None
+    } else {
+        Some(to_stored_path(paths, full_path))
+    };
+
+    let title = if transcript.text.trim().is_empty() {
+        full_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Untitled".into())
+    } else {
+        make_title(&transcript.text)
+    };
+
+    let item = HistoryItem {
+        id: job_id.to_string(),
+        kind: HistoryKind::Stt,
+        created_at: Utc::now().timestamp_millis(),
+        title,
+        text: transcript.text.clone(),
+        audio_path,
+        duration_ms: Some(duration_ms),
+        model_id: model_id.to_string(),
+        voice_id: None,
+        language: transcript.language,
+        device: "cpu".into(),
+        processing_ms: start.elapsed().as_millis() as i64,
+        favorite: false,
+        segments_json: Some(serde_json::to_string(&transcript.segments)?),
+    };
+
+    insert_history(paths, &item)?;
+    Ok(item)
+}
+
+/// Request cancellation of a running synthesis/transcription job.
 #[command]
 pub async fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<()> {
-    let _ = state.try_get::<RecorderState>().map(|r| {
-        let recorder = r.lock().unwrap();
-    });
-    Ok(())
+    if state.jobs.cancel(&job_id) {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("No running job: {}", job_id)))
+    }
 }
