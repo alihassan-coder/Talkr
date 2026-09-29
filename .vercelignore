@@ -1,0 +1,10 @@
+# Only the web app and the shared packages are needed to build the site.
+node_modules
+**/node_modules
+.turbo
+**/.turbo
+.env*
+apps/desktop/src-tauri
+apps/desktop/dist
+apps/web/.next
+apps/web/out

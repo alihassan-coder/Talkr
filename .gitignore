@@ -43,3 +43,9 @@ coverage
 # Talkr data (local development)
 .talkr
 *.tsbuildinfo
+
+# Vercel
+.vercel
+
+.vercel
+.env*
