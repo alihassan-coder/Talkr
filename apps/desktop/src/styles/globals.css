@@ -21,6 +21,7 @@
   --animate-caret: caret 1.1s steps(1) infinite;
   --animate-level: level 0.9s ease-in-out infinite alternate;
   --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-pop: pop 0.18s var(--ease-out-quint) both;
 
   @keyframes rise {
     from { opacity: 0; transform: translateY(8px); }
@@ -34,13 +35,45 @@
     from { transform: scaleY(0.2); }
     to { transform: scaleY(1); }
   }
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(var(--pop-from, -4px)) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
   @keyframes shimmer {
     from { transform: translateX(-100%); }
     to { transform: translateX(100%); }
   }
 }
 
+/*
+  Themes swap the same two variables, so every `fg/…` and `bg/…` utility
+  follows along. index.html sets both attributes before first paint.
+  The defaults above are Graphite dark; the bare light rule is Graphite light
+  and also the fallback for an unknown theme.
+*/
 @layer base {
+  :root {
+    color-scheme: dark;
+    --shadow-pop: 0 18px 48px -14px rgb(0 0 0 / 0.65), 0 2px 8px -2px rgb(0 0 0 / 0.35);
+  }
+  :root[data-mode="light"] {
+    color-scheme: light;
+    --color-bg: #f5f4f0;
+    --color-fg: #121212;
+    --shadow-pop: 0 18px 44px -16px rgb(0 0 0 / 0.2), 0 2px 8px -3px rgb(0 0 0 / 0.1);
+  }
+
+  :root[data-theme="midnight"][data-mode="dark"] { --color-bg: #0a0e17; --color-fg: #e3e9f5; }
+  :root[data-theme="midnight"][data-mode="light"] { --color-bg: #eef2f9; --color-fg: #0e1a33; }
+  :root[data-theme="forest"][data-mode="dark"] { --color-bg: #0a110d; --color-fg: #e2ece4; }
+  :root[data-theme="forest"][data-mode="light"] { --color-bg: #eef4ef; --color-fg: #10231a; }
+  :root[data-theme="ember"][data-mode="dark"] { --color-bg: #120c09; --color-fg: #f3e5dc; }
+  :root[data-theme="ember"][data-mode="light"] { --color-bg: #f8efe8; --color-fg: #2d150b; }
+  :root[data-theme="plum"][data-mode="dark"] { --color-bg: #100b13; --color-fg: #ece3f3; }
+  :root[data-theme="plum"][data-mode="light"] { --color-bg: #f5eff8; --color-fg: #24142f; }
+  :root[data-theme="sand"][data-mode="dark"] { --color-bg: #12100b; --color-fg: #efe5d1; }
+  :root[data-theme="sand"][data-mode="light"] { --color-bg: #f6f0e3; --color-fg: #2a2316; }
+
   html,
   body,
   #root {
@@ -48,7 +81,6 @@
   }
 
   html {
-    color-scheme: dark;
     background-color: var(--color-bg);
     color: var(--color-fg);
     -webkit-font-smoothing: antialiased;
@@ -118,4 +150,18 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
+
+/*
+  Colour cross-fade while the theme or mode changes. Only on during the
+  switch (appearance.ts adds and removes the class), and unlayered so it wins
+  over the transition utilities for that moment.
+*/
+:root.theme-fade,
+:root.theme-fade *,
+:root.theme-fade *::before,
+:root.theme-fade *::after {
+  transition-property: background-color, border-color, color, fill, stroke, outline-color, box-shadow;
+  transition-duration: 280ms;
+  transition-timing-function: var(--ease-out-quint);
 }

@@ -13,7 +13,7 @@ export function Toaster() {
           key={t.id}
           role={t.tone === 'error' ? 'alert' : 'status'}
           className={cx(
-            'pointer-events-auto flex animate-rise items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-[0_20px_60px_-20px_color-mix(in_oklab,var(--color-bg)_90%,transparent)]',
+            'pointer-events-auto flex animate-rise items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-[var(--shadow-pop)]',
             t.tone === 'error' ? 'border-fg/25 bg-bg text-fg' : 'border-fg/10 bg-bg text-fg/85',
           )}
         >

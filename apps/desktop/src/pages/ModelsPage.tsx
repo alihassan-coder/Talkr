@@ -402,7 +402,7 @@ function ImportMenu() {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-2 w-64 animate-rise rounded-xl border border-fg/10 bg-bg p-1 shadow-[0_16px_40px_-12px_rgb(0_0_0/0.6)]"
+          className="absolute right-0 top-full z-20 mt-2 w-64 animate-rise rounded-xl border border-fg/10 bg-bg p-1 shadow-[var(--shadow-pop)]"
         >
           <MenuItem title="Speech to text" detail="Whisper GGML file · .bin" onClick={() => void pick('stt')} />
           <MenuItem title="Text to speech" detail="sherpa-onnx model folder" onClick={() => void pick('tts')} />

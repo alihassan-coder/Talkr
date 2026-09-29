@@ -23,10 +23,12 @@ import type {
   StorageUsage,
   Voice,
 } from '@/lib/types'
-import { Button, PageHeader, Segmented, Select } from '@/components/ui'
+import { Button, PageHeader, Segmented } from '@/components/ui'
+import { Select } from '@/components/Select'
 import { cx } from '@/lib/cx'
 import { toast, toastError } from '@/stores/toast'
 import { Row, Section, Switch } from '@/features/settings/controls'
+import { AppearanceSection } from '@/features/settings/Appearance'
 import { formatBytes } from '@/features/history/utils'
 
 const VERSION = '0.1.0'
@@ -264,6 +266,8 @@ export function SettingsPage() {
         <p className="-mt-6 font-mono text-[11px] text-fg/35">Preview. Changes are not saved outside the desktop app.</p>
       ) : null}
 
+      <AppearanceSection />
+
       <Section title="Defaults">
         <Row label="Transcription model" description="Used by Transcribe unless you pick another.">
           <ModelSelect
@@ -278,15 +282,12 @@ export function SettingsPage() {
             label=""
             aria-label="Transcription language"
             value={settings.sttLanguage}
-            onChange={(e) => save({ sttLanguage: e.target.value })}
-          >
-            {languages.map(([code, name]) => (
-              <option key={code} value={code}>
-                {name}
-              </option>
-            ))}
-            {hasLanguageOption ? null : <option value={settings.sttLanguage}>{settings.sttLanguage}</option>}
-          </Select>
+            onChange={(sttLanguage) => save({ sttLanguage })}
+            options={[
+              ...languages.map(([code, name]) => ({ value: code, label: name })),
+              ...(hasLanguageOption ? [] : [{ value: settings.sttLanguage, label: settings.sttLanguage }]),
+            ]}
+          />
         </Row>
         <Row label="Speech model" description="Used by Speak unless you pick another.">
           <ModelSelect
@@ -302,22 +303,15 @@ export function SettingsPage() {
               label=""
               aria-label="Default voice"
               value={settings.defaultVoice ?? ''}
-              onChange={(e) => save({ defaultVoice: e.target.value })}
-            >
-              {settings.defaultVoice === null ? (
-                <option value="" disabled>
-                  Not set
-                </option>
-              ) : null}
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-              {settings.defaultVoice && !voices.some((v) => v.id === settings.defaultVoice) ? (
-                <option value={settings.defaultVoice}>{settings.defaultVoice}</option>
-              ) : null}
-            </Select>
+              onChange={(defaultVoice) => save({ defaultVoice })}
+              placeholder="Not set"
+              options={[
+                ...voices.map((v) => ({ value: v.id, label: v.name })),
+                ...(settings.defaultVoice && !voices.some((v) => v.id === settings.defaultVoice)
+                  ? [{ value: settings.defaultVoice, label: settings.defaultVoice }]
+                  : []),
+              ]}
+            />
           </Row>
         ) : null}
         <Row label="Speed" description="Speaking rate for generated speech.">
@@ -353,15 +347,9 @@ export function SettingsPage() {
             label=""
             aria-label="CPU threads"
             value={String(settings.cpuThreads)}
-            onChange={(e) => save({ cpuThreads: Number(e.target.value) })}
-          >
-            <option value="0">Auto</option>
-            {threadOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </Select>
+            onChange={(n) => save({ cpuThreads: Number(n) })}
+            options={[{ value: '0', label: 'Auto' }, ...threadOptions.map((n) => ({ value: String(n), label: String(n) }))]}
+          />
         </Row>
       </Section>
 
@@ -371,20 +359,17 @@ export function SettingsPage() {
             label=""
             aria-label="Keep history"
             value={String(settings.historyRetentionDays)}
-            onChange={(e) => {
+            onChange={(days) => {
               setCleanedCount(null)
-              save({ historyRetentionDays: Number(e.target.value) })
+              save({ historyRetentionDays: Number(days) })
             }}
-          >
-            {retentionOptions.map(([days, name]) => (
-              <option key={days} value={days}>
-                {name}
-              </option>
-            ))}
-            {hasRetentionOption ? null : (
-              <option value={settings.historyRetentionDays}>{settings.historyRetentionDays} days</option>
-            )}
-          </Select>
+            options={[
+              ...retentionOptions.map(([days, name]) => ({ value: String(days), label: name })),
+              ...(hasRetentionOption
+                ? []
+                : [{ value: String(settings.historyRetentionDays), label: `${settings.historyRetentionDays} days` }]),
+            ]}
+          />
         </Row>
         <Row
           label="Clean up now"
@@ -505,19 +490,18 @@ function ModelSelect({
     return <span className="font-mono text-[12px] text-fg/40">No models installed</span>
   }
   return (
-    <Select label="" aria-label={label} value={value ?? ''} onChange={(e) => onChange(e.target.value)} className="max-w-60">
-      {value === null ? (
-        <option value="" disabled>
-          Not set
-        </option>
-      ) : null}
-      {models.map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.name}
-        </option>
-      ))}
-      {value && !models.some((m) => m.id === value) ? <option value={value}>{value} (not installed)</option> : null}
-    </Select>
+    <Select
+      label=""
+      aria-label={label}
+      value={value ?? ''}
+      onChange={onChange}
+      placeholder="Not set"
+      className="max-w-60"
+      options={[
+        ...models.map((m) => ({ value: m.id, label: m.name })),
+        ...(value && !models.some((m) => m.id === value) ? [{ value, label: `${value} (not installed)` }] : []),
+      ]}
+    />
   )
 }
 

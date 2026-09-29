@@ -4,8 +4,74 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Talkr</title>
+    <script>
+      // Paint the saved theme before React loads so the window never flashes the wrong colours.
+      // Mirrors useUi in src/stores/ui.ts (key `talkr.ui`) and useApplyAppearance.
+      ;(function () {
+        var root = document.documentElement
+        var mode = 'system'
+        var theme = 'graphite'
+        try {
+          var saved = JSON.parse(localStorage.getItem('talkr.ui') || 'null')
+          var state = (saved && saved.state) || {}
+          if (state.mode === 'light' || state.mode === 'dark') mode = state.mode
+          if (typeof state.theme === 'string') theme = state.theme
+        } catch (e) {}
+        try {
+          if (mode === 'system') mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        } catch (e) {
+          mode = 'dark'
+        }
+        root.setAttribute('data-theme', theme)
+        root.setAttribute('data-mode', mode)
+        // The launch screen paints before any stylesheet, so it needs the palette here.
+        // Keep in sync with src/lib/themes.ts.
+        var palettes = {
+          graphite: { dark: ['#0b0b0c', '#ededea'], light: ['#f5f4f0', '#121212'] },
+          midnight: { dark: ['#0a0e17', '#e3e9f5'], light: ['#eef2f9', '#0e1a33'] },
+          forest: { dark: ['#0a110d', '#e2ece4'], light: ['#eef4ef', '#10231a'] },
+          ember: { dark: ['#120c09', '#f3e5dc'], light: ['#f8efe8', '#2d150b'] },
+          plum: { dark: ['#100b13', '#ece3f3'], light: ['#f5eff8', '#24142f'] },
+          sand: { dark: ['#12100b', '#efe5d1'], light: ['#f6f0e3', '#2a2316'] },
+        }
+        var pair = (palettes[theme] || palettes.graphite)[mode]
+        root.style.setProperty('--splash-bg', pair[0])
+        root.style.setProperty('--splash-fg', pair[1])
+      })()
+    </script>
+    <style>
+      html { background: var(--splash-bg, #0b0b0c); }
+      #splash {
+        position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+        background: var(--splash-bg, #0b0b0c); color: var(--splash-fg, #ededea);
+        transition: opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.35s;
+      }
+      #splash.out { opacity: 0; visibility: hidden; }
+      #splash .lockup { display: flex; flex-direction: column; align-items: center; gap: 14px; animation: splash-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+      #splash svg { width: 56px; height: 56px; fill: currentColor; }
+      #splash .bar { transform-box: fill-box; transform-origin: center; animation: splash-bar 0.9s ease-in-out infinite alternate; }
+      #splash .bar:nth-of-type(5) { animation-delay: -0.3s; }
+      #splash .bar:nth-of-type(6) { animation-delay: -0.6s; }
+      #splash .word { font: 600 15px/1 "Geist Variable", system-ui, sans-serif; letter-spacing: -0.02em; opacity: 0.55; }
+      @keyframes splash-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } }
+      @keyframes splash-bar { from { transform: scaleY(0.45); } }
+      @media (prefers-reduced-motion: reduce) { #splash * { animation: none !important; } }
+    </style>
   </head>
   <body>
+    <div id="splash" aria-hidden="true">
+      <div class="lockup">
+        <svg viewBox="5 5 54 54">
+          <rect x="7.25" y="21" width="22" height="5.5" rx="2.75" />
+          <rect x="7.25" y="29.25" width="15" height="5.5" rx="2.75" />
+          <rect x="7.25" y="37.5" width="19" height="5.5" rx="2.75" />
+          <rect class="bar" x="34.25" y="22" width="5.5" height="20" rx="2.75" />
+          <rect class="bar" x="42.75" y="13" width="5.5" height="38" rx="2.75" />
+          <rect class="bar" x="51.25" y="24.5" width="5.5" height="15" rx="2.75" />
+        </svg>
+        <span class="word">Talkr</span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

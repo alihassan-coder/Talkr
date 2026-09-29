@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { AudioWaveform, Mic } from 'lucide-react'
-import { Button, Card, EmptyState, PageHeader, Progress, Segmented, Select } from '@/components/ui'
+import { Button, Card, EmptyState, PageHeader, Progress, Segmented } from '@/components/ui'
+import { Select } from '@/components/Select'
 import { getSettings, isTauri, listInstalledModels, transcribeFile } from '@/lib/api'
 import type { HistoryItem, InstalledModel } from '@/lib/types'
 import { toastError } from '@/stores/toast'
@@ -114,21 +115,24 @@ export function TranscribePage() {
       {tauri ? null : <PreviewNotice>Preview mode. Recording and transcription run in the Talkr desktop app.</PreviewNotice>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Select label="Model" value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={job.running}>
-          {models.length === 0 ? <option value="">Whisper Base</option> : null}
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </Select>
-        <Select label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} disabled={job.running}>
-          {LANGUAGES.map((l) => (
-            <option key={l.code} value={l.code}>
-              {l.label}
-            </option>
-          ))}
-        </Select>
+        <Select
+          label="Model"
+          value={modelId}
+          onChange={setModelId}
+          disabled={job.running}
+          options={
+            models.length === 0
+              ? [{ value: '', label: 'Whisper Base' }]
+              : models.map((m) => ({ value: m.id, label: m.name }))
+          }
+        />
+        <Select
+          label="Language"
+          value={language}
+          onChange={setLanguage}
+          disabled={job.running}
+          options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
+        />
         <Switch label="Translate to English" checked={translate} onChange={setTranslate} disabled={job.running} />
       </div>
 

@@ -1,5 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
-import { ChevronDown, LoaderCircle } from 'lucide-react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { LoaderCircle } from 'lucide-react'
 import { cx } from '@/lib/cx'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -103,26 +103,6 @@ export function PageHeader({ title, description, actions }: { title: string; des
   )
 }
 
-export function Select({
-  label,
-  className,
-  children,
-  ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & { label: string }) {
-  return (
-    <label className={cx('relative inline-flex h-9 items-center rounded-full border border-fg/12 pl-3.5 pr-8 text-[13px] transition-colors hover:border-fg/20 focus-within:border-fg/30', className)}>
-      <span className="mr-1.5 text-fg/45">{label}</span>
-      <select
-        className="min-w-0 cursor-pointer appearance-none bg-transparent font-medium text-fg outline-none [&>option]:bg-bg"
-        {...props}
-      >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 size-3.5 text-fg/45" strokeWidth={2} />
-    </label>
-  )
-}
-
 /** Horizontal segmented control with a sliding thumb. */
 export function Segmented<T extends string>({
   value,
@@ -131,7 +111,7 @@ export function Segmented<T extends string>({
   label,
 }: {
   value: T
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; icon?: ReactNode }[]
   onChange: (value: T) => void
   label: string
 }) {
@@ -159,10 +139,11 @@ export function Segmented<T extends string>({
           aria-selected={o.value === value}
           onClick={() => onChange(o.value)}
           className={cx(
-            'relative z-10 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-300',
+            'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-300',
             o.value === value ? 'text-bg' : 'text-fg/55 hover:text-fg',
           )}
         >
+          {o.icon}
           {o.label}
         </button>
       ))}

@@ -1,15 +1,14 @@
-/** A speech bubble with three audio bars knocked out of it. Same mark as the website. */
+/** Lines of text turning into a waveform: words in, voice out. Same mark as the website. */
 export function LogoMark({ className = 'size-6' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 28 28" className={className} aria-hidden="true" focusable="false">
-      <path
-        d="M14 2C7.37 2 2 7.37 2 14c0 2.4.7 4.63 1.9 6.5L2.5 25.5l5-1.4A11.94 11.94 0 0 0 14 26c6.63 0 12-5.37 12-12S20.63 2 14 2Z"
-        className="fill-fg"
-      />
-      <g className="fill-bg">
-        <rect x="8.5" y="11.5" width="2" height="5" rx="1" />
-        <rect x="13" y="8.5" width="2" height="11" rx="1" />
-        <rect x="17.5" y="11" width="2" height="6" rx="1" />
+    <svg viewBox="5 5 54 54" className={className} aria-hidden="true" focusable="false">
+      <g className="fill-fg">
+        <rect x="7.25" y="21" width="22" height="5.5" rx="2.75" />
+        <rect x="7.25" y="29.25" width="15" height="5.5" rx="2.75" />
+        <rect x="7.25" y="37.5" width="19" height="5.5" rx="2.75" />
+        <rect x="34.25" y="22" width="5.5" height="20" rx="2.75" />
+        <rect x="42.75" y="13" width="5.5" height="38" rx="2.75" />
+        <rect x="51.25" y="24.5" width="5.5" height="15" rx="2.75" />
       </g>
     </svg>
   )

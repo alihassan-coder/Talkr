@@ -12,3 +12,18 @@ createRoot(document.getElementById('root')!).render(
     </HashRouter>
   </StrictMode>,
 )
+
+// Fade out the launch screen from index.html once the first frame is on screen. It stays up
+// for at least a beat so it reads as a logo, not a flicker.
+const splash = document.getElementById('splash')
+if (splash) {
+  const shownFor = performance.now()
+  setTimeout(
+    () =>
+      requestAnimationFrame(() => {
+        splash.classList.add('out')
+        splash.addEventListener('transitionend', () => splash.remove(), { once: true })
+      }),
+    Math.max(0, 450 - shownFor),
+  )
+}

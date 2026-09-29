@@ -8,6 +8,8 @@ import { TranscribePage } from '@/pages/TranscribePage'
 import { ModelsPage } from '@/pages/ModelsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { useApplyAppearance } from '@/lib/appearance'
+import { useUi } from '@/stores/ui'
 
 const shortcuts: Record<string, string> = {
   '1': '/speak',
@@ -17,12 +19,17 @@ const shortcuts: Record<string, string> = {
   ',': '/settings',
 }
 
-/** Ctrl/Cmd + 1-4 and Ctrl/Cmd + , jump between screens, like a native app. */
+/** Ctrl/Cmd + 1-4 and Ctrl/Cmd + , jump between screens, like a native app. Ctrl/Cmd + B toggles the sidebar. */
 function useNavigationShortcuts() {
   const navigate = useNavigate()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+      if (e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        useUi.getState().toggleSidebar()
+        return
+      }
       const target = shortcuts[e.key]
       if (!target) return
       e.preventDefault()
@@ -35,6 +42,7 @@ function useNavigationShortcuts() {
 
 export function App() {
   useNavigationShortcuts()
+  useApplyAppearance()
   const location = useLocation()
 
   // Stop the WebView from behaving like a browser: no reload menu, no file drops navigating away.

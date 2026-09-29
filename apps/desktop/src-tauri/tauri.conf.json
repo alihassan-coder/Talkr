@@ -18,7 +18,8 @@
         "height": 800,
         "minWidth": 960,
         "minHeight": 640,
-        "center": true
+        "center": true,
+        "backgroundColor": "#0b0b0c"
       }
     ],
     "security": {
@@ -42,8 +43,15 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/installer/nsis-header.bmp",
+        "sidebarImage": "icons/installer/nsis-sidebar.bmp"
+      },
       "wix": {
-        "language": "en-US"
+        "language": "en-US",
+        "bannerPath": "icons/installer/wix-banner.bmp",
+        "dialogImagePath": "icons/installer/wix-dialog.bmp"
       }
     },
     "macOS": {

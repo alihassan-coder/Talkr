@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { AudioLines, Download, Volume2, X } from 'lucide-react'
-import { Button, Card, EmptyState, Kbd, PageHeader, Progress, Select } from '@/components/ui'
+import { Button, Card, EmptyState, Kbd, PageHeader, Progress } from '@/components/ui'
+import { Select } from '@/components/Select'
 import {
   audioSrc,
   getAppPaths,
@@ -182,27 +183,20 @@ export function SpeakPage() {
           <Select
             label="Voice"
             value={voiceId}
-            onChange={(e) => setVoiceId(e.target.value)}
+            onChange={setVoiceId}
             disabled={!voices || voices.length === 0}
-          >
-            {voices === null ? <option value={voiceId}>{tauri ? 'Loading…' : 'af_heart'}</option> : null}
-            {voices?.length === 0 ? <option value="">No voices</option> : null}
-            {voices?.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-                {v.language ? ` · ${v.language}` : ''}
-              </option>
-            ))}
-          </Select>
+            placeholder={voices === null ? (tauri ? 'Loading…' : 'af_heart') : 'No voices'}
+            options={(voices ?? []).map((v) => ({ value: v.id, label: v.name, hint: v.language || undefined }))}
+          />
 
           {models.length > 1 ? (
-            <Select label="Model" value={modelId} onChange={(e) => changeModel(e.target.value)} disabled={job.running}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </Select>
+            <Select
+              label="Model"
+              value={modelId}
+              onChange={changeModel}
+              disabled={job.running}
+              options={models.map((m) => ({ value: m.id, label: m.name }))}
+            />
           ) : null}
 
           <SpeedControl value={speed} onChange={setSpeed} />
