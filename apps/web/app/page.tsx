@@ -1,23 +1,29 @@
 import { Navbar } from '@/components/Navbar'
-import { Hero } from '@/components/Hero'
-import { Features } from '@/components/Features'
-import { HowItWorks } from '@/components/HowItWorks'
-import { ModelsShowcase } from '@/components/ModelsShowcase'
-import { PrivacySection } from '@/components/PrivacySection'
-import { FAQ } from '@/components/FAQ'
 import { Footer } from '@/components/Footer'
+import { Hero } from '@/components/home/Hero'
+import { Stack } from '@/components/home/Stack'
+import { Features } from '@/components/home/Features'
+import { Models } from '@/components/home/Models'
+import { Compare } from '@/components/home/Compare'
+import { Privacy } from '@/components/home/Privacy'
+import { OpenSource } from '@/components/home/OpenSource'
+import { FAQ } from '@/components/home/FAQ'
+import { FinalCta } from '@/components/home/FinalCta'
 
 export default function HomePage() {
   return (
     <>
       <Navbar />
-      <main className="min-h-screen">
+      <main>
         <Hero />
+        <Stack />
         <Features />
-        <HowItWorks />
-        <ModelsShowcase />
-        <PrivacySection />
+        <Models />
+        <Compare />
+        <Privacy />
+        <OpenSource />
         <FAQ />
+        <FinalCta />
       </main>
       <Footer />
     </>

@@ -31,21 +31,26 @@ impl SttEngine for WhisperEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(true);
 
-        params.set_progress_callback_safe(|progress| {
+        // SAFETY: whisper-rs requires a 'static callback, but `params` (which owns the
+        // closure) is consumed and dropped inside `state.full` before this function returns.
+        let on_progress: &'static dyn Fn(f32) = unsafe { std::mem::transmute(on_progress) };
+        params.set_progress_callback_safe(move |progress: i32| {
             on_progress(progress as f32 / 100.0);
         });
 
         state.full(params, samples).map_err(|e| AppError::Engine(e.to_string()))?;
 
-        let num_segments = state.full_n_segments().map_err(|e| AppError::Engine(e.to_string()))?;
+        let num_segments = state.full_n_segments();
 
         let mut segments = Vec::new();
         let mut full_text = String::new();
 
         for i in 0..num_segments {
-            let text = state.full_get_segment_text(i).map_err(|e| AppError::Engine(e.to_string()))?;
-            let start_ts = state.full_get_segment_t0(i).map_err(|e| AppError::Engine(e.to_string()))?;
-            let end_ts = state.full_get_segment_t1(i).map_err(|e| AppError::Engine(e.to_string()))?;
+            let segment = state.get_segment(i)
+                .ok_or_else(|| AppError::Engine(format!("Missing segment {}", i)))?;
+            let text = segment.to_str_lossy().map_err(|e| AppError::Engine(e.to_string()))?.into_owned();
+            let start_ts = segment.start_timestamp();
+            let end_ts = segment.end_timestamp();
 
             segments.push(TranscriptSegment {
                 start_ms: start_ts as i64 * 10,
@@ -59,9 +64,8 @@ impl SttEngine for WhisperEngine {
             full_text.push_str(&text);
         }
 
-        let language = state.full_lang_id().ok().and_then(|id| {
-            whisper_rs::language_code_to_name(id).map(|s| s.to_string())
-        });
+        let language = whisper_rs::get_lang_str_full(state.full_lang_id_from_state())
+            .map(|s| s.to_string());
 
         Ok(Transcript {
             text: full_text,

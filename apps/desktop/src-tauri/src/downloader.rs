@@ -144,7 +144,7 @@ impl DownloadJob {
             state: DownloadState::Verifying,
         });
 
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
         if hash.to_lowercase() != self.sha256.to_lowercase() {
             fs::remove_file(&part_path).await.ok();
             return Err(AppError::Download("SHA256 mismatch".into()));

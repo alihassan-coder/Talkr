@@ -42,3 +42,4 @@ coverage
 
 # Talkr data (local development)
 .talkr
+*.tsbuildinfo

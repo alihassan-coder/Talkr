@@ -1,32 +1,45 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
+import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 
+const sans = Geist({
+  subsets: ['latin'],
+  variable: '--font-geist-sans',
+  display: 'swap',
+})
+
+const mono = Geist_Mono({
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+  display: 'swap',
+})
+
 export const metadata: Metadata = {
-  title: 'Talkr - Your Voice Tools, Private & Offline',
-  description: 'Free, private, offline desktop app for text-to-speech and speech-to-text. Run Whisper and Kokoro locally on your GPU or CPU. No account, no cloud, no telemetry.',
+  metadataBase: new URL('https://talkr.app'),
+  title: {
+    default: 'Talkr: speech tools that never phone home',
+    template: '%s · Talkr',
+  },
+  description:
+    'Turn text into speech and speech into text on your own computer. Whisper, Kokoro and Piper run locally on your GPU. Free, open source, no account.',
   openGraph: {
-    title: 'Talkr - Your Voice Tools, Private & Offline',
-    description: 'Free, private, offline desktop app for text-to-speech and speech-to-text.',
+    title: 'Talkr: speech tools that never phone home',
+    description: 'Text to speech and speech to text, running entirely on your own machine.',
     type: 'website',
     locale: 'en_US',
     siteName: 'Talkr',
   },
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export const viewport: Viewport = {
+  themeColor: '#0b0b0c',
+  colorScheme: 'dark',
+}
+
+export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      </head>
-      <body className="min-h-screen bg-bg-primary">
-        {children}
-      </body>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <body className="min-h-dvh overflow-x-clip bg-bg text-fg">{children}</body>
     </html>
   )
 }

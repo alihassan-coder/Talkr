@@ -1,75 +1,132 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
 
+/*
+  Two colours: `bg` (near-black) and `fg` (soft white). The default palette is
+  switched off, so depth comes only from opacity: `text-fg/60`, `border-fg/10`,
+  `bg-fg/[0.03]`.
+*/
 @theme {
-  --color-bg-primary: #FFFFFF;
-  --color-bg-canvas: #F7F7FA;
-  --color-bg-card: #FFFFFF;
+  --color-*: initial;
+  --color-bg: #0b0b0c;
+  --color-fg: #ededea;
 
-  --color-text-primary: #0F1115;
-  --color-text-secondary: #5B6070;
-  --color-text-muted: #9AA0AE;
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --color-accent: #5B5BF7;
-  --color-accent-hover: #4A4AE6;
-  --color-accent-soft: #EEEEFF;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-reveal: reveal 12s linear infinite;
+  --animate-playhead: playhead 12s linear infinite;
+  --animate-segment: segment 12s linear infinite;
+  --animate-caret: caret 1.1s steps(1) infinite;
+  --animate-level: level 0.9s ease-in-out infinite alternate;
+  --animate-rise: rise 0.9s var(--ease-out-quint) both;
 
-  --color-success: #16C79A;
-  --color-success-soft: #E6FAF5;
-
-  --color-warning: #F5A524;
-  --color-warning-soft: #FFF7E6;
-
-  --color-danger: #EF4444;
-  --color-danger-soft: #FEF2F2;
-
-  --color-border: #ECECF1;
-
-  --radius-card: 24px;
-  --radius-input: 14px;
-  --radius-pill: 9999px;
-
-  --shadow-soft: 0 1px 2px rgba(16,17,21,0.04), 0 8px 24px rgba(16,17,21,0.06);
-  --shadow-card: 0 1px 2px rgba(16,17,21,0.04), 0 4px 12px rgba(16,17,21,0.05);
-
-  --font-sans: "Inter Variable", system-ui, sans-serif;
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+    50% { transform: translateY(-10px) rotate(calc(var(--r, 0deg) * -0.5)); }
+  }
+  @keyframes reveal {
+    from { clip-path: inset(0 100% 0 0); }
+    to { clip-path: inset(0 0 0 0); }
+  }
+  @keyframes playhead {
+    from { transform: translateX(0); }
+    to { transform: translateX(100%); }
+  }
+  /* One 12s cycle holds three 4s segments; each row is delayed by 4s × index. */
+  @keyframes segment {
+    0% { opacity: 0.35; }
+    1.5%, 31.5% { opacity: 1; }
+    33.3%, 100% { opacity: 0.35; }
+  }
+  @keyframes caret {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  @keyframes level {
+    from { transform: scaleY(0.2); }
+    to { transform: scaleY(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); filter: blur(4px); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
 }
 
-* {
-  box-sizing: border-box;
+@keyframes reveal-in {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: none; }
 }
 
-html, body {
-  height: 100%;
-  width: 100%;
+@layer components {
+  /* Scroll-driven entrance. Pure CSS; browsers without view timelines just show the content. */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .reveal {
+        animation: reveal-in linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 45%;
+      }
+    }
+  }
+
+  /* Soft light that follows the pointer. Position and visibility are set by <SpotlightGroup>. */
+  .spotlight::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: var(--spot, 0);
+    transition: opacity 400ms var(--ease-out-quint);
+    background: radial-gradient(
+      380px circle at var(--mx, 50%) var(--my, 50%),
+      color-mix(in oklab, var(--color-fg) 7%, transparent),
+      transparent 65%
+    );
+  }
+
+  .spotlight > * {
+    position: relative;
+    z-index: 1;
+  }
 }
 
-body {
-  font-family: var(--font-sans);
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: 15px;
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.01em;
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-::selection {
-  background-color: var(--color-accent-soft);
-  color: var(--color-accent);
-}
+@layer base {
+  html {
+    color-scheme: dark;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
+  body {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+  }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  ::selection {
+    background-color: var(--color-fg);
+    color: var(--color-bg);
+  }
+
+  :focus-visible {
+    outline: 1.5px solid var(--color-fg);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
   }
 }

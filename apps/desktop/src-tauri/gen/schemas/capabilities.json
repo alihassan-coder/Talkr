@@ -1,0 +1,1 @@
+{"app.talkr":{"identifier":"app.talkr","description":"Talkr - Free, private, offline speech tools","local":true,"permissions":["core:default","dialog:default","opener:default","log:default","fs:default","fs:allow-appdata-read-recursive","fs:allow-appdata-write-recursive","fs:allow-home-read-recursive"]}}

@@ -6,35 +6,47 @@ authors = ["Talkr Contributors"]
 license = "MIT"
 edition = "2021"
 
+[lib]
+name = "talkr_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = [
-  "dialog",
-  "opener",
-  "log",
-  "fs"
-] }
+tauri = { version = "2.0", features = [] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-opener = "2.0"
-tauri-plugin-log = { version = "2.0", features = ["fern"] }
+tauri-plugin-log = "2.0"
 tauri-plugin-fs = "2.0"
+log = "0.4"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
-dirs = "5.0"
-sysinfo = "0.30"
-tokio = { version = "1.38", features = ["full"] }
-rusqlite = { version = "0.31", features = ["bundled", "extra_check"] }
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
-sha2 = "0.10"
+dirs = "6.0"
+sysinfo = "0.39"
+num_cpus = "1.17"
+walkdir = "2.5"
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.40", features = ["bundled", "extra_check"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+sha2 = "0.11"
 tar = "0.4"
-bzip2 = "0.4"
-flume = "0.11"
+bzip2 = "0.6"
+flume = "0.12"
 uuid = { version = "1.8", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Audio
+cpal = "0.15"
+symphonia = { version = "0.5", features = ["all"] }
+rubato = "0.15"
+hound = "3.5"
+
+# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx downloads prebuilt libs)
+whisper-rs = "0.16"
+sherpa-rs = "0.6"

@@ -57,7 +57,7 @@ impl HardwareInfo {
         let cpu_name = sys.cpus().first()
             .map(|c| c.brand().to_string())
             .unwrap_or_else(|| "Unknown CPU".to_string());
-        let cpu_cores = sys.physical_core_count().unwrap_or(sys.cpus().len());
+        let cpu_cores = System::physical_core_count().unwrap_or(sys.cpus().len());
         let ram_bytes = sys.total_memory();
 
         let gpus = Self::detect_gpus();
