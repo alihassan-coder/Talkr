@@ -55,13 +55,15 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
           key: ${{ matrix.target }}
 
-      # whisper.cpp needs CMake + clang; cpal needs ALSA; Tauri needs WebKitGTK.
+      # whisper.cpp needs CMake + clang; cpal needs ALSA; Tauri needs WebKitGTK; the AppImage
+      # bundles GStreamer so audio playback works on every distro.
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev
+            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -8,7 +8,7 @@ import { RELEASES_URL, VERSION, downloadUrl, platforms } from '@/lib/releases'
 export const metadata: Metadata = {
   title: 'Download',
   description:
-    'Download Talkr for Windows, macOS or Linux. Free, open-source, offline text-to-speech and speech-to-text. Checksums and signatures on every release.',
+    'Download Talkr for Windows, macOS or Linux. Free, open-source, offline text-to-speech and speech-to-text. SHA-256 checksums on every release.',
 }
 
 const checks = [
@@ -99,8 +99,8 @@ export default function DownloadPage() {
               ))}
             </div>
             <p className="mx-auto mt-8 max-w-2xl text-pretty text-center text-sm leading-relaxed text-fg/50">
-              Installers are signed where the platform supports it: Authenticode on Windows, notarized on macOS, GPG
-              signatures for Linux packages. Signature files are on the{' '}
+              Builds are not code-signed yet. On Windows, click More info, then Run anyway. On macOS, right-click the
+              app and choose Open the first time. Each platform&apos;s SHA256SUMS file is on the{' '}
               <a
                 href={RELEASES_URL}
                 target="_blank"

@@ -1,0 +1,4 @@
+# sherpa-onnx's static Windows libs are built with /MT, so the whole app must use the
+# static C runtime too. Bonus: users don't need the Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

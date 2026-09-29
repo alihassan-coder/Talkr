@@ -47,9 +47,10 @@ symphonia = { version = "0.5", features = ["all"] }
 rubato = "0.15"
 hound = "3.5"
 
-# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx downloads prebuilt libs)
+# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx links its prebuilt
+# libs statically so the installers need no extra .dll/.so/.dylib files next to the app)
 whisper-rs = "0.16"
-sherpa-rs = "0.6"
+sherpa-rs = { version = "0.6", features = ["static"] }
 
 [features]
 # Opt-in GPU backends for whisper.cpp (require the matching SDK at build time).
