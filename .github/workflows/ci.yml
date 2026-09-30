@@ -76,6 +76,14 @@ jobs:
           key: test-models-${{ hashFiles('packages/model-catalog/catalog.json') }}
       - name: Fetch test models
         run: node apps/desktop/scripts/fetch-test-models.mjs .test-models
+      # A restored rust-cache skips sherpa-rs-sys's build script, but the sherpa-onnx libraries it
+      # downloads live outside target/ and aren't restored: rerun it (see release-desktop.yml).
+      - name: Stage sherpa-onnx libraries
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo clean -p sherpa-rs-sys
+          cargo build -p sherpa-rs-sys
       # The app's build script needs the engine sidecar to exist, and the engine tests run it.
       - name: Build the engine
         run: node apps/desktop/scripts/build-engine.mjs --debug
@@ -137,6 +145,14 @@ jobs:
           key: test-models-${{ hashFiles('packages/model-catalog/catalog.json') }}
       - name: Fetch test models
         run: node apps/desktop/scripts/fetch-test-models.mjs .test-models
+      # A restored rust-cache skips sherpa-rs-sys's build script, but the sherpa-onnx libraries it
+      # downloads live outside target/ and aren't restored: rerun it (see release-desktop.yml).
+      - name: Stage sherpa-onnx libraries
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo clean -p sherpa-rs-sys
+          cargo build -p sherpa-rs-sys
       - name: Build the GPU engine
         env:
           TALKR_REQUIRE_GPU: '1'
