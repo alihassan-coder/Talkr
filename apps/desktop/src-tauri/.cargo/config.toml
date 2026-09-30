@@ -8,3 +8,10 @@ CMAKE_C_FLAGS_RELEASE = "-O2 -DNDEBUG"
 CMAKE_CXX_FLAGS_RELEASE = "-O2 -DNDEBUG"
 CMAKE_C_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"
 CMAKE_CXX_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"
+
+# Never tune whisper.cpp for the building machine's CPU by default: a cargo command that builds
+# it (tests, clippy, a cached CI build) would otherwise bake in that CPU's instruction set, and
+# the result dies with "illegal instruction" elsewhere. Portable x86-64 baseline: AVX2, FMA,
+# F16C (checked at runtime by the app). build-engine.mjs turns native tuning on only for Apple
+# Silicon, where every chip runs it.
+GGML_NATIVE = "OFF"

@@ -62,7 +62,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          key: engine-v2
+          key: engine-v3
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -126,7 +126,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          key: engine-vulkan-v2
+          key: engine-vulkan-v3
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |

@@ -76,7 +76,7 @@ jobs:
           # Bump the suffix when a build setting the cache can't see changes (GGML_NATIVE and the
           # CMAKE_*_FLAGS set by build-engine.mjs are not rerun triggers for whisper-rs-sys, so a
           # restored cache would keep the old build).
-          key: ${{ matrix.target }}-engine-v2
+          key: ${{ matrix.target }}-engine-v3
 
       # whisper.cpp needs CMake + clang; cpal needs ALSA; Tauri needs WebKitGTK; the AppImage
       # bundles GStreamer so audio playback works on every distro.
