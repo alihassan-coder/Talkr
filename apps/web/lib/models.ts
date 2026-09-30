@@ -29,10 +29,17 @@ export function formatBytes(bytes: number) {
   return `${Math.round(bytes / 1e6)} MB`
 }
 
-/** "Whisper Small (Multilingual)" -> { base: "Whisper Small", variant: "Multilingual" } */
+/**
+ * "Whisper Small (Multilingual)" -> { base: "Whisper Small", variant: "Multilingual" }.
+ * A trailing "(compressed)" is dropped; `isCompressed` covers it.
+ */
 export function splitName(name: string) {
-  const match = name.match(/^(.*?)\s*\((.*)\)$/)
-  return match ? { base: match[1] ?? name, variant: match[2] ?? null } : { base: name, variant: null }
+  const match = name.match(/^(.*?)\s*((?:\([^()]*\)\s*)+)$/)
+  if (!match) return { base: name, variant: null }
+  const groups = [...(match[2] ?? '').matchAll(/\(([^()]*)\)/g)]
+    .map((g) => (g[1] ?? '').trim())
+    .filter((g) => g !== '' && g.toLowerCase() !== 'compressed')
+  return { base: match[1] || name, variant: groups.length ? groups.join(' · ') : null }
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -55,3 +62,6 @@ export function shortLicense(license: string) {
 }
 
 export const isRecommended = (m: CatalogModel) => m.tags.includes('recommended')
+
+/** Quantized variants: smaller, and they need less memory. */
+export const isCompressed = (m: CatalogModel) => m.tags.includes('quantized') || m.tags.includes('low-memory')

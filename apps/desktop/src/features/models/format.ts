@@ -12,10 +12,18 @@ export function formatRam(bytes: number) {
   return `${Math.round(bytes / 1024 ** 3)} GB`
 }
 
-/** "Whisper Small (Multilingual)" -> { base: "Whisper Small", variant: "Multilingual" } */
+/**
+ * "Whisper Small (Multilingual)" -> { base: "Whisper Small", variant: "Multilingual" }.
+ * A trailing "(compressed)" is dropped: the Compressed badge says it
+ * ("Whisper Small (English) (compressed)" -> "Whisper Small" + "English").
+ */
 export function splitName(name: string) {
-  const match = name.match(/^(.*?)\s*\((.*)\)$/)
-  return match ? { base: match[1] ?? name, variant: match[2] ?? null } : { base: name, variant: null }
+  const match = name.match(/^(.*?)\s*((?:\([^()]*\)\s*)+)$/)
+  if (!match) return { base: name, variant: null }
+  const groups = [...(match[2] ?? '').matchAll(/\(([^()]*)\)/g)]
+    .map((g) => (g[1] ?? '').trim())
+    .filter((g) => g !== '' && g.toLowerCase() !== 'compressed')
+  return { base: match[1] || name, variant: groups.length ? groups.join(' · ') : null }
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -40,6 +48,16 @@ export function shortLicense(license: string) {
 }
 
 export const isRecommended = (m: CatalogModel) => m.tags.includes('recommended')
+
+/** Quantized (q5) variants: smaller download, less memory, nearly the same accuracy. */
+export const isCompressed = (m: Pick<CatalogModel, 'id' | 'tags'>) =>
+  m.tags.includes('quantized') || m.tags.includes('low-memory') || /-q\d+(_\d+)?$/.test(m.id)
+
+export const COMPRESSED_HINT = 'Compressed · uses less memory'
+
+/** The compressed variant of `model` in `catalog` (e.g. whisper-small -> whisper-small-q5), if any. */
+export const compressedAlternative = (model: CatalogModel, catalog: CatalogModel[]) =>
+  isCompressed(model) ? null : (catalog.find((m) => m.id.startsWith(`${model.id}-q`) && isCompressed(m)) ?? null)
 
 const TAG_LABELS: Record<string, string> = {
   'gpu-required': 'Needs a GPU',

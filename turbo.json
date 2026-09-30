@@ -6,18 +6,54 @@
       "persistent": true
     },
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", "out/**", "target/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        "out/**",
+        "target/**"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": [
+        "^typecheck"
+      ]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": [
+        "^lint"
+      ]
     },
     "validate": {
       "cache": false
+    },
+    "test": {
+      "dependsOn": [
+        "transit"
+      ],
+      "outputs": []
+    },
+    "transit": {
+      "dependsOn": [
+        "^transit"
+      ]
+    },
+    "test:e2e": {
+      "dependsOn": [
+        "build"
+      ],
+      "outputs": [
+        "playwright-report/**",
+        "test-results/**"
+      ],
+      "passThroughEnv": [
+        "PLAYWRIGHT_*",
+        "CI"
+      ]
     }
   },
-  "globalEnv": ["TALKR_HOME"]
+  "globalEnv": [
+    "TALKR_HOME"
+  ]
 }

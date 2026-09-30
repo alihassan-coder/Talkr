@@ -1,18 +1,21 @@
+use std::path::Path;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 use chrono::Utc;
 use serde::Serialize;
+use talkr_protocol::{Event, ModelRef, Op, TranscribeJob};
 use tauri::{command, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
-use crate::audio::{decode, resample, wav};
+use crate::audio::wav;
 use crate::catalog::ModelKind;
 use crate::commands::models::locate_model;
 use crate::commands::tts::make_title;
-use crate::commands::{finish_job, job_control, resolve_path, to_stored_path, EVENT_MIC_LEVEL, EVENT_STT_DONE};
+use crate::commands::{
+    catch_panic, ensure_memory_for_model, finish_job, is_owned_audio, progress_emitter, resolve_path, to_stored_path,
+    EVENT_MIC_LEVEL, EVENT_STT_DONE,
+};
 use crate::db::{insert_history, HistoryItem, HistoryKind};
-use crate::engines::stt_whisper::WhisperEngine;
-use crate::engines::{JobControl, SttEngine, SttOptions};
+use crate::engine_host::failure_to_error;
 use crate::error::{AppError, Result};
 use crate::AppState;
 
@@ -24,31 +27,62 @@ pub struct RecordingResult {
     pub duration_ms: i64,
 }
 
-/// Get the cached STT engine for `model_id`, loading it if needed. Blocking.
-pub(crate) fn load_stt(state: &AppState, model_id: &str) -> Result<Arc<dyn SttEngine>> {
-    let mut engines = state.engines();
-    if let Some(engine) = engines.get_stt(model_id) {
-        return Ok(engine);
-    }
+/// Resolve an installed speech-to-text model for the engine, checking up front what can be
+/// checked (kind, CPU support, free memory) so the common failures get a clear message.
+pub(crate) fn stt_model(state: &AppState, model_id: &str, gpu: bool) -> Result<ModelRef> {
     let (kind, dir) = locate_model(&state.paths, model_id)
         .filter(|(_, dir)| dir.join("manifest.json").is_file())
         .ok_or_else(|| AppError::NotFound(format!("Model not installed: {}", model_id)))?;
     if kind != ModelKind::Stt {
         return Err(AppError::Validation(format!("{} is not a speech-to-text model", model_id)));
     }
-    let engine: Arc<dyn SttEngine> = Arc::new(WhisperEngine::new(&dir, model_id.to_string())?);
-    engines.set_stt(engine.clone());
-    Ok(engine)
+    check_cpu_support()?;
+    // On the GPU the weights live in video memory; the engine checks that fits itself.
+    if !gpu {
+        ensure_memory_for_model(&dir, model_id)?;
+    }
+    Ok(ModelRef { model_id: model_id.to_string(), dir, threads: state.cpu_threads(), gpu })
+}
+
+/// whisper.cpp is compiled for x86-64 CPUs with AVX2, FMA, F16C and BMI2 (roughly 2013 onwards; the
+/// release workflow sets GGML_NATIVE=OFF so it is not tuned to the build machine). On an older CPU
+/// the first instruction it hits would kill the app, so say so instead.
+fn check_cpu_support() -> Result<()> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let missing: Vec<&str> = [
+            ("AVX2", std::arch::is_x86_feature_detected!("avx2")),
+            ("FMA", std::arch::is_x86_feature_detected!("fma")),
+            ("F16C", std::arch::is_x86_feature_detected!("f16c")),
+            ("BMI2", std::arch::is_x86_feature_detected!("bmi2")),
+        ]
+        .into_iter()
+        .filter(|(_, ok)| !ok)
+        .map(|(name, _)| name)
+        .collect();
+        if !missing.is_empty() {
+            return Err(AppError::Validation(format!(
+                "This processor lacks {}, which speech to text needs. Text to speech still works.",
+                missing.join(", ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Start recording from the default microphone. Emits `mic://level` (RMS, 0..1) ~20x/s.
 #[command]
-pub async fn start_recording(state: State<'_, AppState>, app: AppHandle) -> Result<()> {
-    let (recording, level) = {
+pub async fn start_recording(app: AppHandle) -> Result<()> {
+    // Opening the device can take seconds (or time out) with some drivers; keep it off the
+    // async runtime.
+    let recorder_app = app.clone();
+    let (recording, level) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+        let state = recorder_app.state::<AppState>();
         let mut recorder = state.recorder();
         recorder.start()?;
-        (recorder.recording_flag(), recorder.level_handle())
-    };
+        Ok((recorder.recording_flag(), recorder.level_handle()))
+    })
+    .await??;
 
     tauri::async_runtime::spawn(async move {
         while recording.load(Ordering::Relaxed) {
@@ -63,12 +97,18 @@ pub async fn start_recording(state: State<'_, AppState>, app: AppHandle) -> Resu
 
 /// Stop recording and save the audio as a WAV file under `~/.talkr/audio`.
 #[command]
-pub async fn stop_recording(state: State<'_, AppState>) -> Result<RecordingResult> {
-    let (samples, sample_rate) = {
+pub async fn stop_recording(state: State<'_, AppState>, app: AppHandle) -> Result<RecordingResult> {
+    let (samples, sample_rate, limit_reached) = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
+        let state = app.state::<AppState>();
         let mut recorder = state.recorder();
+        let limit_reached = recorder.limit_reached();
         let samples = recorder.stop()?;
-        (samples, recorder.sample_rate())
-    };
+        Ok((samples, recorder.sample_rate(), limit_reached))
+    })
+    .await??;
+    if limit_reached {
+        log::warn!("recording hit the length limit; keeping what was captured");
+    }
 
     if samples.is_empty() {
         return Err(AppError::Audio("No audio was captured".into()));
@@ -120,56 +160,64 @@ pub async fn transcribe_file(
     };
 
     let job_id = Uuid::new_v4().to_string();
-    let cancel = state.jobs.register(&job_id);
-    let ctl = job_control(&app, &job_id, cancel);
+    state.jobs.register(&job_id);
 
     let job_app = app.clone();
     let job = job_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = job_app.state::<AppState>();
-        let opts = SttOptions {
+        let request = SttRequest {
+            path: &full_path,
+            model_id: &model_id,
             language: Some(language).filter(|l| !l.is_empty()),
             translate: translate.unwrap_or(false),
-            threads: state.cpu_threads(),
+            save_recordings,
         };
-        let result = run_transcription(&state, &ctl, &job, &full_path, &model_id, &opts, save_recordings);
+        let result = catch_panic(|| run_transcription(&job_app, &state, &job, &request));
         finish_job(&job_app, &state, &job, EVENT_STT_DONE, result);
     });
 
     Ok(job_id)
 }
 
-fn run_transcription(
-    state: &AppState,
-    ctl: &JobControl,
-    job_id: &str,
-    full_path: &std::path::Path,
-    model_id: &str,
-    opts: &SttOptions,
+struct SttRequest<'a> {
+    path: &'a Path,
+    model_id: &'a str,
+    language: Option<String>,
+    translate: bool,
     save_recordings: bool,
-) -> Result<HistoryItem> {
+}
+
+fn run_transcription(app: &AppHandle, state: &AppState, job_id: &str, request: &SttRequest) -> Result<HistoryItem> {
     let start = std::time::Instant::now();
-    ctl.progress(0.0);
+    let progress = progress_emitter(app, job_id);
+    progress(0.0);
 
-    let stt = load_stt(state, model_id)?;
-    if ctl.is_cancelled() {
+    let gpu = state.engine.should_use_gpu(state.gpu_policy());
+    let model = stt_model(state, request.model_id, gpu)?;
+    if state.jobs.is_cancelled(job_id) {
         return Err(AppError::Cancelled);
     }
-
-    let (samples, sample_rate) = decode::decode_audio_file(full_path)?;
-    let samples = resample::resample_to_16k_mono(&samples, sample_rate)?;
-    if ctl.is_cancelled() {
-        return Err(AppError::Cancelled);
-    }
-
-    let transcript = stt.transcribe(&samples, opts, ctl)?;
+    let make_op = |gpu: bool| {
+        Op::Transcribe(TranscribeJob {
+            model: ModelRef { gpu, ..model.clone() },
+            audio_path: request.path.to_path_buf(),
+            language: request.language.clone(),
+            translate: request.translate,
+        })
+    };
+    let (transcript, duration_ms, device) = match state.engine.run(job_id, &make_op, gpu, &progress)? {
+        Event::Transcribed { transcript, audio_ms, device, .. } => (transcript, audio_ms, device),
+        Event::Failed { kind, error, .. } => return Err(failure_to_error(kind, error)),
+        other => return Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
+    };
 
     let paths = &state.paths;
-    let duration_ms = (samples.len() as f64 / 16000.0 * 1000.0) as i64;
-    let is_own_recording = full_path.starts_with(&paths.audio);
+    let full_path = request.path;
+    let is_own_recording = is_owned_audio(paths, full_path);
 
     // Recordings made in-app are discarded after transcription when the user opted out of keeping them.
-    let audio_path = if is_own_recording && !save_recordings {
+    let audio_path = if is_own_recording && !request.save_recordings {
         std::fs::remove_file(full_path).ok();
         None
     } else {
@@ -193,10 +241,10 @@ fn run_transcription(
         text: transcript.text.clone(),
         audio_path,
         duration_ms: Some(duration_ms),
-        model_id: model_id.to_string(),
+        model_id: request.model_id.to_string(),
         voice_id: None,
         language: transcript.language,
-        device: "cpu".into(),
+        device,
         processing_ms: start.elapsed().as_millis() as i64,
         favorite: false,
         segments_json: Some(serde_json::to_string(&transcript.segments)?),
@@ -210,6 +258,7 @@ fn run_transcription(
 #[command]
 pub async fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<()> {
     if state.jobs.cancel(&job_id) {
+        state.engine.cancel(&job_id);
         Ok(())
     } else {
         Err(AppError::NotFound(format!("No running job: {}", job_id)))

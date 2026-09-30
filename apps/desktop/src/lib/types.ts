@@ -67,6 +67,31 @@ export interface PartialSettings {
   saveRecordings?: boolean
 }
 
+/** Kind of compute device the speech engine found. */
+export type EngineDeviceKind = 'cpu' | 'gpu' | 'igpu' | 'accelerator'
+
+export interface EngineDevice {
+  kind: EngineDeviceKind
+  /** Backend name, e.g. "Vulkan0", "CUDA0" or "Metal". */
+  name: string
+  /** Human name, e.g. "NVIDIA GeForce RTX 3060". */
+  description: string
+  memoryFree: number
+  memoryTotal: number
+}
+
+/** What the speech engine can run on (get_engine_status). */
+export interface EngineStatus {
+  /** Devices the engine reported; includes the CPU once the engine runs. */
+  devices: EngineDevice[]
+  /** A GPU build (or Metal) is installed and has not failed. */
+  gpuAvailable: boolean
+  /** The GPU engine crashed or could not start, so speech to text fell back to the CPU. */
+  gpuFailed: boolean
+  /** Whether speech to text uses the GPU with the current setting. */
+  sttUsesGpu: boolean
+}
+
 export interface StorageUsage {
   modelsBytes: number
   audioBytes: number

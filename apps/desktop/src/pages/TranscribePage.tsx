@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { AudioWaveform, Mic } from 'lucide-react'
 import { Button, Card, EmptyState, PageHeader, Progress, Segmented } from '@/components/ui'
+import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import { getSettings, isTauri, listInstalledModels, transcribeFile } from '@/lib/api'
 import type { HistoryItem, InstalledModel } from '@/lib/types'
@@ -162,6 +163,12 @@ export function TranscribePage() {
       ) : (
         <DropZone disabled={!modelId && tauri} onFile={(path) => transcribe(path, baseName(path))} />
       )}
+
+      {job.error ? (
+        <Notice tone="error" title="Transcription failed" onDismiss={job.dismissError}>
+          {job.error}
+        </Notice>
+      ) : null}
 
       {result ? <TranscriptResult key={result.item.id} item={result.item} name={result.name} /> : null}
     </div>

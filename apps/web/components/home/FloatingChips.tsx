@@ -10,7 +10,7 @@ const chips = [
   { text: '0 bytes uploaded', className: 'left-[1%] top-[76%]', r: '3deg', delay: '-4.8s', depth: 1 },
   { text: 'Kokoro · af_heart', className: 'right-0 top-[10%]', r: '6deg', delay: '-1.2s', depth: 1.2 },
   { text: '.wav', className: 'right-[8%] top-[42%]', r: '-5deg', delay: '-5.6s', depth: 0.5 },
-  { text: 'Metal · CUDA · Vulkan', className: 'right-[1%] top-[74%]', r: '-4deg', delay: '-3.6s', depth: 0.9 },
+  { text: 'Metal · Vulkan', className: 'right-[1%] top-[74%]', r: '-4deg', delay: '-3.6s', depth: 0.9 },
 ]
 
 export function FloatingChips() {

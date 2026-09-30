@@ -9,6 +9,7 @@ import type {
   AppPaths,
   CatalogModel,
   DownloadProgress,
+  EngineStatus,
   ExportFormat,
   HardwareInfo,
   HistoryItem,
@@ -33,6 +34,9 @@ export const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS
 // ---------- system / settings ----------
 
 export const getHardwareInfo = () => invoke<HardwareInfo>('get_hardware_info')
+
+/** Compute devices, and whether speech to text runs on the GPU. Refetch after changing `device`. */
+export const getEngineStatus = () => invoke<EngineStatus>('get_engine_status')
 
 export const getAppPaths = () => invoke<AppPaths>('get_app_paths')
 

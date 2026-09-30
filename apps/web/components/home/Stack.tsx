@@ -1,6 +1,6 @@
 import { Container } from '@/components/ui'
 
-const items = ['whisper.cpp', 'sherpa-onnx', 'Kokoro', 'Piper', 'Metal', 'CUDA', 'Vulkan', 'Tauri']
+const items = ['whisper.cpp', 'sherpa-onnx', 'Kokoro', 'Piper', 'Metal', 'Vulkan', 'Tauri']
 
 export function Stack() {
   return (

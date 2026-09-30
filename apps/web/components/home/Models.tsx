@@ -3,6 +3,7 @@ import {
   type CatalogModel,
   describeLanguages,
   formatBytes,
+  isCompressed,
   isRecommended,
   models,
   shortLicense,
@@ -32,6 +33,11 @@ function ModelList({ title, meta, items }: { title: string; meta: string; items:
                   {variant ? <span className="text-fg/45">{variant}</span> : null}
                   {isRecommended(model) ? (
                     <span className="rounded-full bg-fg px-2 py-px text-[10px] font-medium text-bg">Recommended</span>
+                  ) : null}
+                  {isCompressed(model) ? (
+                    <span className="rounded-full border border-fg/15 px-2 py-px text-[10px] font-medium text-fg/55">
+                      Compressed · less memory
+                    </span>
                   ) : null}
                 </p>
                 <p className="mt-1 font-mono text-[11px] text-fg/40" title={model.license}>

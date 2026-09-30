@@ -1,6 +1,6 @@
 [package]
 name = "talkr"
-version = "0.1.2"
+version = "0.1.3"
 description = "Free, private, offline speech tools"
 authors = ["Talkr Contributors"]
 license = "MIT"
@@ -8,7 +8,20 @@ edition = "2021"
 
 [lib]
 name = "talkr_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only. (Tauri's mobile targets would also need "staticlib" and "cdylib", each a full
+# copy of every dependency, which roughly triples build size and time.)
+crate-type = ["rlib"]
+
+[workspace]
+members = ["protocol", "engine"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+log = "0.4"
+hound = "3.5"
+tempfile = "3"
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
@@ -18,12 +31,12 @@ tauri = { version = "2.0", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-opener = "2.0"
 tauri-plugin-log = "2.0"
-tauri-plugin-fs = "2.0"
-log = "0.4"
+log = { workspace = true }
+talkr-protocol = { path = "protocol" }
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 anyhow = "1.0"
 dirs = "6.0"
 sysinfo = "0.39"
@@ -41,36 +54,38 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Audio
-cpal = "0.15"
-symphonia = { version = "0.5", features = ["all"] }
-rubato = "0.15"
-hound = "3.5"
+# Microphone capture (the engine process does decoding and inference)
+cpal = "0.18"
+hound = { workspace = true }
 
-# Speech engines (native: whisper.cpp builds via CMake + clang; sherpa-onnx uses prebuilt libs)
-whisper-rs = "0.16"
+[dev-dependencies]
+tempfile = { workspace = true }
 
-# macOS links sherpa-onnx statically, so the .app needs no extra .dylib files.
-[target.'cfg(target_os = "macos")'.dependencies]
-sherpa-rs = { version = "0.6", features = ["static"] }
+# Dependencies' debug info is most of a debug build's size; line tables keep backtraces useful.
+[profile.dev]
+debug = "line-tables-only"
 
-# Windows and Linux use sherpa's shared libs (its static archives don't link there: /MT vs
-# /MD on Windows, link order on Linux). The installers ship them: tauri.windows.conf.json puts
-# the DLLs next to talkr.exe, and tauri.linux.conf.json puts the .so files in /usr/lib/talkr,
-# where build.rs points the binary's rpath.
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-sherpa-rs = "0.6"
+[profile.dev.package."*"]
+debug = false
+# Audio DSP (rubato, symphonia) is 50-100x slower unoptimized, which makes debug builds and
+# tests unusably slow on real audio.
+opt-level = 2
 
-[features]
-# Opt-in GPU backends for whisper.cpp (require the matching SDK at build time).
-cuda = ["whisper-rs/cuda"]
-vulkan = ["whisper-rs/vulkan"]
-metal = ["whisper-rs/metal"]
+[profile.dev.package.talkr-engine]
+opt-level = 2
+
+# Build scripts run without debug assertions: sherpa-rs-sys links the debug C runtime (msvcrtd)
+# when they are on, next to whisper.cpp's release one, and two C++ runtimes in one process
+# hang or crash whisper on Windows (LNK4098).
+[profile.dev.build-override]
+debug-assertions = false
 
 # Smaller, faster release binaries, as recommended by the Tauri docs.
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Unwind, not abort: a panic inside a transcription or synthesis job becomes an error
+# message (commands::catch_panic) instead of closing the app.
+panic = "unwind"
 strip = true

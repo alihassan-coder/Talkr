@@ -36,7 +36,7 @@ export function Hero() {
 
             <p className="mx-auto mt-7 max-w-xl animate-rise text-pretty text-lg leading-relaxed text-fg/55 [animation-delay:160ms] motion-reduce:animate-none md:text-xl">
               Turn text into speech and speech into text, right on your computer. Whisper, Kokoro and Piper run on your own
-              GPU. No account, no API key, no monthly bill.
+              hardware. No account, no API key, no monthly bill.
             </p>
 
             <div className="mt-10 flex animate-rise flex-col items-center justify-center gap-3 [animation-delay:240ms] motion-reduce:animate-none sm:flex-row">

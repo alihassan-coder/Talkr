@@ -7,7 +7,7 @@ const rows: { label: string; cloud: string; talkr: string; positive: boolean }[]
   { label: 'Works offline', cloud: 'No', talkr: 'Yes, after the model downloads', positive: true },
   { label: 'Account', cloud: 'Required', talkr: 'None', positive: true },
   { label: 'Price', cloud: 'Per minute or monthly', talkr: 'Free, MIT licensed', positive: true },
-  { label: 'Speed', cloud: 'Depends on your connection', talkr: 'Depends on your GPU', positive: false },
+  { label: 'Speed', cloud: 'Depends on your connection', talkr: 'Depends on your computer', positive: false },
   { label: 'Can you read the code?', cloud: 'Usually not', talkr: 'Every line', positive: true },
 ]
 

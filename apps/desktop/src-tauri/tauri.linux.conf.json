@@ -20,6 +20,10 @@
           "/usr/lib/talkr/libonnxruntime.so": "target/release/libonnxruntime.so"
         }
       }
-    }
+    },
+    "externalBin": [
+      "binaries/talkr-engine",
+      "binaries/talkr-engine-gpu"
+    ]
   }
 }

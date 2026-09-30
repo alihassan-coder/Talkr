@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { AudioLines, Download, Volume2, X } from 'lucide-react'
 import { Button, Card, EmptyState, Kbd, PageHeader, Progress } from '@/components/ui'
+import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import {
   audioSrc,
@@ -234,6 +235,12 @@ export function SpeakPage() {
             Cancel
           </Button>
         </Card>
+      ) : null}
+
+      {job.error ? (
+        <Notice tone="error" title="Could not generate speech" onDismiss={job.dismissError}>
+          {job.error}
+        </Notice>
       ) : null}
 
       {currentItem?.audioPath && home ? (

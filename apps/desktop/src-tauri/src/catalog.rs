@@ -1,8 +1,35 @@
 use std::fs;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::paths::AppPaths;
+
+/// Longest model id we accept. Ids become directory and file names.
+pub const MAX_MODEL_ID_LEN: usize = 100;
+
+/// Whether `id` is safe to use as a single path component on every platform:
+/// 1 to 100 characters from `[A-Za-z0-9._-]`, and not `.` or `..`. This rules out
+/// separators, drive prefixes (`C:`), alternate data streams and traversal.
+pub fn is_valid_model_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_MODEL_ID_LEN
+        && id != "."
+        && id != ".."
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// [`is_valid_model_id`] as a `Result`, for commands that take an id from the frontend.
+pub fn validate_model_id(id: &str) -> Result<()> {
+    if is_valid_model_id(id) {
+        Ok(())
+    } else {
+        Err(AppError::Validation(format!(
+            "Invalid model id \"{}\": use 1 to {} letters, digits, '.', '_' or '-'",
+            id.chars().take(MAX_MODEL_ID_LEN + 1).collect::<String>(),
+            MAX_MODEL_ID_LEN
+        )))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,3 +147,7 @@ impl CatalogModel {
         ModelManifest::read(&self.dir(paths))
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod tests;

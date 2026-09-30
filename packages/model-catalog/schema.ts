@@ -1,8 +1,10 @@
 import { z } from 'zod'
 
+export const SHA256_RE = /^[0-9a-f]{64}$/
+
 export const ModelFileSchema = z.object({
   url: z.string().url(),
-  sha256: z.string().length(64),
+  sha256: z.string().regex(SHA256_RE, 'sha256 must be 64 lowercase hex characters'),
   archive: z.string().optional(),
 })
 

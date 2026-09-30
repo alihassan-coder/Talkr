@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { errorText } from '@/lib/errors'
 
 export type Toast = { id: number; message: string; tone: 'default' | 'error' }
 
@@ -23,5 +24,4 @@ export const useToasts = create<ToastState>((set, get) => ({
 /** Shorthands usable outside React components. */
 export const toast = (message: string) => useToasts.getState().push(message)
 
-export const toastError = (error: unknown) =>
-  useToasts.getState().push(error instanceof Error ? error.message : String(error), 'error')
+export const toastError = (error: unknown) => useToasts.getState().push(errorText(error), 'error')

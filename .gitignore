@@ -11,6 +11,8 @@ target
 
 # Tauri
 apps/desktop/src-tauri/target
+# Engine sidecars, built by apps/desktop/scripts/build-engine.mjs
+apps/desktop/src-tauri/binaries
 
 # IDE
 .idea

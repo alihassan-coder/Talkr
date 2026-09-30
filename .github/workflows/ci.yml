@@ -5,14 +5,20 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # The release workflow runs this first and only builds installers when it passes.
+  workflow_call:
+
+# Read-only token: CI only checks code, it never writes to the repo.
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
-  web-and-frontend:
-    name: Typecheck, lint, build (JS)
+  js:
+    name: JS - typecheck, lint, unit tests, builds, web e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,28 +28,111 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Every model needs a real sha256 and a pinned URL, or the app refuses to install it.
+      - run: pnpm --filter @talkr/model-catalog validate --offline
       - run: pnpm --filter web --filter desktop typecheck
       - run: pnpm --filter web --filter desktop lint
+      - run: pnpm --filter web --filter desktop test
       - run: pnpm --filter web build
       - run: pnpm --filter desktop build
+      - name: Install Playwright's Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      - run: pnpm --filter web test:e2e
 
   rust:
-    name: Rust check and clippy
-    runs-on: ubuntu-22.04
+    name: Rust - clippy and tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    env:
+      # Real-model tests: Piper speaks a sentence and Whisper must hear it back.
+      TALKR_TEST_MODELS: ${{ github.workspace }}/.test-models
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-      - name: Install system dependencies
+          key: engine-v2
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libssl-dev libudev-dev libasound2-dev cmake clang libclang-dev
+      - name: Cache test models
+        uses: actions/cache@v4
+        with:
+          path: .test-models
+          key: test-models-${{ hashFiles('packages/model-catalog/catalog.json') }}
+      - name: Fetch test models
+        run: node apps/desktop/scripts/fetch-test-models.mjs .test-models
+      # The app's build script needs the engine sidecar to exist, and the engine tests run it.
+      - name: Build the engine
+        run: node apps/desktop/scripts/build-engine.mjs --debug
       # Tauri's build script expects the frontend output folder to exist.
       - run: mkdir -p apps/desktop/dist
-      - working-directory: apps/desktop/src-tauri
-        run: cargo clippy --locked --all-targets -- -D warnings
+        shell: bash
+      - name: Clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          # Test binaries live in target/debug/deps; sherpa-onnx's shared libraries sit in
+          # target/debug (macOS links them statically).
+          export LD_LIBRARY_PATH="$PWD/target/debug:${LD_LIBRARY_PATH:-}"
+          export PATH="$PWD/target/debug:$PATH"
+          cargo test --workspace --locked
+
+  gpu-engine:
+    name: Rust - Vulkan engine build and GPU tests (Linux, software Vulkan)
+    runs-on: ubuntu-22.04
+    env:
+      TALKR_TEST_MODELS: ${{ github.workspace }}/.test-models
+      # Mesa's lavapipe driver runs Vulkan on the CPU, so the GPU code path is exercised for real
+      # without a GPU on the runner.
+      TALKR_TEST_GPU: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: engine-vulkan-v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libasound2-dev libvulkan-dev mesa-vulkan-drivers
+      - name: Install the Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          cache: true
+      - name: Cache test models
+        uses: actions/cache@v4
+        with:
+          path: .test-models
+          key: test-models-${{ hashFiles('packages/model-catalog/catalog.json') }}
+      - name: Fetch test models
+        run: node apps/desktop/scripts/fetch-test-models.mjs .test-models
+      - name: Build the GPU engine
+        env:
+          TALKR_REQUIRE_GPU: '1'
+        run: node apps/desktop/scripts/build-engine.mjs --debug
+      - name: GPU engine tests
+        working-directory: apps/desktop/src-tauri
+        run: |
+          vulkaninfo --summary || true
+          export LD_LIBRARY_PATH="$PWD/target/debug:${LD_LIBRARY_PATH:-}"
+          cargo test -p talkr-engine --features vulkan --locked -- --nocapture

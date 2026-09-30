@@ -70,6 +70,11 @@ impl JobControl {
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }
+
+    /// The raw cancel flag, for native engines that poll it from C.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
 }
 
 pub trait SttEngine: Send + Sync {
@@ -105,6 +110,15 @@ impl EngineRegistry {
 
     pub fn set_tts(&mut self, engine: Arc<dyn TtsEngine>) {
         self.tts = Some(engine);
+    }
+
+    /// Drop the cached engine of the other kind so its memory can go to the model being loaded.
+    /// A job still using it keeps it alive until that job ends.
+    pub fn release_other(&mut self, kind: crate::catalog::ModelKind) {
+        match kind {
+            crate::catalog::ModelKind::Stt => self.tts = None,
+            crate::catalog::ModelKind::Tts => self.stt = None,
+        }
     }
 
     /// Drop any cached engine for `model_id` (e.g. before deleting its files).

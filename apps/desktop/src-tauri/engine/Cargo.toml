@@ -1,0 +1,44 @@
+[package]
+name = "talkr-engine"
+version = "0.1.3"
+description = "Talkr's speech engine process (whisper.cpp and sherpa-onnx)"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "talkr-engine"
+path = "src/main.rs"
+
+[dependencies]
+talkr-protocol = { path = "../protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+hound = { workspace = true }
+symphonia = { version = "0.6.1", features = ["all"] }
+rubato = "5.0.0"
+whisper-rs = { version = "0.16", features = ["log_backend", "raw-api"] }
+
+# macOS links sherpa-onnx statically, so the .app needs no extra .dylib files, and whisper.cpp
+# gets Metal: every Mac that runs macOS 11 has a Metal GPU.
+[target.'cfg(target_os = "macos")'.dependencies]
+sherpa-rs = { version = "0.6", features = ["static"] }
+whisper-rs = { version = "0.16", features = ["log_backend", "raw-api", "metal"] }
+
+# Windows and Linux use sherpa's shared libs (its static archives don't link there: /MT vs
+# /MD on Windows, link order on Linux). The installers ship them: tauri.windows.conf.json puts
+# the DLLs next to the binaries, and tauri.linux.conf.json puts the .so files in /usr/lib/talkr,
+# where build.rs points the binary's rpath.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sherpa-rs = "0.6"
+
+[features]
+# GPU build for Windows and Linux. It needs the Vulkan SDK to compile and the Vulkan loader
+# to start, so the installers ship it next to a plain CPU build and the app falls back to
+# that one when this one can't start or crashes (see the app's engine_host.rs).
+vulkan = ["whisper-rs/vulkan"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

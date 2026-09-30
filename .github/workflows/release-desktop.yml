@@ -16,9 +16,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Installers are only built from code that passes every test (see ci.yml).
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: ${{ matrix.name }}
+    needs: ci
     runs-on: ${{ matrix.os }}
+    env:
+      # Windows and Linux ship a Vulkan build of the engine next to the CPU one; fail the release
+      # rather than silently shipping without it.
+      TALKR_REQUIRE_GPU: ${{ startsWith(matrix.os, 'macos') && '0' || '1' }}
+      # ggml otherwise builds whisper.cpp with -march=native, i.e. for the runner's CPU (AVX-512
+      # on GitHub's machines), and the app dies with "illegal instruction" on most users' PCs.
+      # OFF targets the common x86-64 baseline (AVX2/FMA/F16C/BMI2), which the app checks at
+      # runtime (commands/stt.rs). Apple Silicon keeps native tuning: every M-series runs it.
+      GGML_NATIVE: ${{ matrix.target == 'aarch64-apple-darwin' && 'ON' || 'OFF' }}
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +73,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri -> target
-          key: ${{ matrix.target }}
+          # Bump the suffix when a build setting the cache can't see changes (GGML_NATIVE and the
+          # CMAKE_*_FLAGS set by build-engine.mjs are not rerun triggers for whisper-rs-sys, so a
+          # restored cache would keep the old build).
+          key: ${{ matrix.target }}-engine-v2
 
       # whisper.cpp needs CMake + clang; cpal needs ALSA; Tauri needs WebKitGTK; the AppImage
       # bundles GStreamer so audio playback works on every distro.
@@ -68,8 +85,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev \
+            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev libvulkan-dev \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
+      # The GPU engine (Windows, Linux) compiles whisper.cpp's Vulkan backend: headers and glslc.
+      - name: Install the Vulkan SDK
+        if: runner.os != 'macOS'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          cache: true
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -82,9 +106,12 @@ jobs:
       - name: Stage sherpa-onnx libraries
         shell: bash
         working-directory: apps/desktop/src-tauri
+        # Values reach the script through env, never pasted into it (no script injection).
+        env:
+          CARGO_ARGS: ${{ matrix.args }}
         run: |
-          cargo clean --release -p sherpa-rs-sys ${{ matrix.args }}
-          cargo build --release -p sherpa-rs-sys ${{ matrix.args }}
+          cargo clean --release -p sherpa-rs-sys $CARGO_ARGS
+          cargo build --release -p sherpa-rs-sys $CARGO_ARGS
           if [ "$RUNNER_OS" = "Windows" ]; then ls -la target/release/*.dll; fi
 
       - name: Build and upload installers
@@ -97,6 +124,8 @@ jobs:
           releaseName: Talkr ${{ github.ref_name }}
           releaseBody: |
             Free, private, offline speech tools. Text to speech with Kokoro and Piper, speech to text with Whisper, all running on your own computer.
+
+            Speech to text uses your graphics card when it can (Vulkan on Windows and Linux, Metal on macOS) and falls back to the CPU on its own. The engines run in a separate process, so a model that runs out of memory can't take the app down.
 
             **Which file do I need?**
             - Windows: `*_x64-setup.exe` (recommended) or `*_x64_en-US.msi`
@@ -114,13 +143,16 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           # target/<triple>/release/bundle with --target, target/release/bundle without.
           cd apps/desktop/src-tauri/target
-          out="SHA256SUMS-${{ matrix.target }}.txt"
+          out="SHA256SUMS-$TARGET.txt"
           find . -path '*release/bundle/*' -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
             | while read -r f; do
                 if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi
               done | sed 's#  .*/#  #' > "$out"
           cat "$out" >> "$GITHUB_STEP_SUMMARY"
-          gh release upload "${{ github.ref_name }}" "$out" --clobber --repo "${{ github.repository }}"
+          gh release upload "$TAG" "$out" --clobber --repo "$REPO"

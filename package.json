@@ -9,12 +9,14 @@
     "lint": "turbo run lint",
     "catalog:validate": "pnpm --filter=model-catalog run validate",
     "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\"",
-    "build:desktop": "pnpm --filter desktop app:build"
+    "build:desktop": "pnpm --filter desktop app:build",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e"
   },
   "devDependencies": {
-    "turbo": "^2.1.0",
-    "prettier": "^3.3.0",
-    "typescript": "^5.5.0"
+    "prettier": "^3.9.9",
+    "turbo": "^2.11.5",
+    "typescript": "^6.0.3"
   },
   "packageManager": "pnpm@9.6.0",
   "engines": {

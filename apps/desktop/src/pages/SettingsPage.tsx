@@ -15,7 +15,6 @@ import {
 } from '@/lib/api'
 import type {
   AppPaths,
-  DevicePreference,
   HardwareInfo,
   InstalledModel,
   PartialSettings,
@@ -23,15 +22,16 @@ import type {
   StorageUsage,
   Voice,
 } from '@/lib/types'
-import { Button, PageHeader, Segmented } from '@/components/ui'
+import { Button, PageHeader } from '@/components/ui'
 import { Select } from '@/components/Select'
 import { cx } from '@/lib/cx'
 import { toast, toastError } from '@/stores/toast'
 import { Row, Section, Switch } from '@/features/settings/controls'
 import { AppearanceSection } from '@/features/settings/Appearance'
+import { ComputeSection } from '@/features/settings/Compute'
 import { formatBytes } from '@/features/history/utils'
 
-const VERSION = '0.1.2'
+const VERSION = '0.1.3'
 const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 
 // Mirrors `Settings::default()` in config.rs; used as the browser preview.
@@ -74,12 +74,6 @@ const retentionOptions: [number, string][] = [
   [30, '30 days'],
   [90, '90 days'],
   [365, '1 year'],
-]
-
-const deviceOptions: { value: DevicePreference; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'gpu', label: 'GPU' },
-  { value: 'cpu', label: 'CPU' },
 ]
 
 const backendNames: Record<HardwareInfo['recommendedBackend'], string> = {
@@ -170,10 +164,11 @@ export function SettingsPage() {
     }
   }
 
+  /** Optimistic: the page updates at once and rolls back if saving fails. Resolves once saved. */
   const save = (patch: PartialSettings) => {
-    if (!settings) return
+    if (!settings) return Promise.resolve()
     setSettings({ ...settings, ...patch })
-    void persist(patch, settings)
+    return persist(patch, settings)
   }
 
   const saveRate = (speechRate: number) => {
@@ -274,7 +269,7 @@ export function SettingsPage() {
             label="Transcription model"
             value={settings.defaultSttModel}
             models={sttModels}
-            onChange={(defaultSttModel) => save({ defaultSttModel })}
+            onChange={(defaultSttModel) => void save({ defaultSttModel })}
           />
         </Row>
         <Row label="Language" description="Spoken language for transcription. Auto works well for most audio.">
@@ -282,7 +277,7 @@ export function SettingsPage() {
             label=""
             aria-label="Transcription language"
             value={settings.sttLanguage}
-            onChange={(sttLanguage) => save({ sttLanguage })}
+            onChange={(sttLanguage) => void save({ sttLanguage })}
             options={[
               ...languages.map(([code, name]) => ({ value: code, label: name })),
               ...(hasLanguageOption ? [] : [{ value: settings.sttLanguage, label: settings.sttLanguage }]),
@@ -294,7 +289,7 @@ export function SettingsPage() {
             label="Speech model"
             value={settings.defaultTtsModel}
             models={ttsModels}
-            onChange={(defaultTtsModel) => save({ defaultTtsModel })}
+            onChange={(defaultTtsModel) => void save({ defaultTtsModel })}
           />
         </Row>
         {settings.defaultTtsModel ? (
@@ -303,7 +298,7 @@ export function SettingsPage() {
               label=""
               aria-label="Default voice"
               value={settings.defaultVoice ?? ''}
-              onChange={(defaultVoice) => save({ defaultVoice })}
+              onChange={(defaultVoice) => void save({ defaultVoice })}
               placeholder="Not set"
               options={[
                 ...voices.map((v) => ({ value: v.id, label: v.name })),
@@ -331,27 +326,17 @@ export function SettingsPage() {
         </Row>
       </Section>
 
-      <Section title="Performance">
-        <Row
-          label="Acceleration"
-          description={
-            hardware
-              ? `Auto picks ${backendNames[hardware.recommendedBackend]} on this computer.`
-              : 'Auto uses the GPU when one is available and falls back to the CPU.'
-          }
-        >
-          <Segmented label="Acceleration" value={settings.device} options={deviceOptions} onChange={(device) => save({ device })} />
-        </Row>
+      <ComputeSection device={settings.device} onDeviceChange={(device) => save({ device })}>
         <Row label="CPU threads" description="Threads used when running on the CPU. Auto uses your physical cores, up to 8.">
           <Select
             label=""
             aria-label="CPU threads"
             value={String(settings.cpuThreads)}
-            onChange={(n) => save({ cpuThreads: Number(n) })}
+            onChange={(n) => void save({ cpuThreads: Number(n) })}
             options={[{ value: '0', label: 'Auto' }, ...threadOptions.map((n) => ({ value: String(n), label: String(n) }))]}
           />
         </Row>
-      </Section>
+      </ComputeSection>
 
       <Section title="History">
         <Row label="Keep history" description="Older items are removed automatically. Favorites are always kept.">
@@ -361,7 +346,7 @@ export function SettingsPage() {
             value={String(settings.historyRetentionDays)}
             onChange={(days) => {
               setCleanedCount(null)
-              save({ historyRetentionDays: Number(days) })
+              void save({ historyRetentionDays: Number(days) })
             }}
             options={[
               ...retentionOptions.map(([days, name]) => ({ value: String(days), label: name })),
@@ -396,7 +381,7 @@ export function SettingsPage() {
           <Switch
             label="Keep recordings"
             checked={settings.saveRecordings}
-            onChange={(saveRecordings) => save({ saveRecordings })}
+            onChange={(saveRecordings) => void save({ saveRecordings })}
           />
         </Row>
       </Section>

@@ -80,9 +80,7 @@ function RecordDemo() {
 
 function GpuDemo() {
   const lines = [
-    ['Metal', 'Apple M2', 'in use'],
-    ['CUDA', 'not found', ''],
-    ['Vulkan', 'not found', ''],
+    ['Vulkan', 'RTX 3060 · 12 GB', 'in use'],
     ['CPU', '8 cores', 'fallback'],
   ]
   return (
@@ -172,7 +170,7 @@ export function Features() {
           <Tile
             className="md:col-span-2"
             title="Uses your GPU"
-            body="Metal, CUDA or Vulkan, picked at launch. No GPU? It quietly uses the CPU instead."
+            body="Transcription runs on Vulkan or Metal, in its own process. No GPU, or it stops? Talkr quietly switches to the CPU."
           >
             <GpuDemo />
           </Tile>

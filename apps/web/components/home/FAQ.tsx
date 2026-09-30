@@ -20,8 +20,9 @@ const faqs: { q: string; a: ReactNode }[] = [
     q: 'What does my computer need?',
     a: (
       <>
-        Windows 10+, macOS 11+, or Linux with glibc 2.31+, and 4 GB of RAM for the smaller models. A GPU makes the big
-        Whisper models much faster: Apple Silicon, an NVIDIA card with CUDA 12+, or any Vulkan 1.2 GPU.
+        Windows 10+, macOS 11+, or Linux with glibc 2.31+, and 4 GB of RAM. The compressed Whisper models are made for
+        smaller machines. A GPU makes transcription much faster: Apple Silicon through Metal, or any Vulkan GPU from NVIDIA,
+        AMD or Intel. Without one, Talkr uses the CPU. Text to speech always runs on the CPU, and it is quick there.
       </>
     ),
   },

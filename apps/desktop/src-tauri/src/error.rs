@@ -29,6 +29,10 @@ pub enum AppError {
     #[error("Engine error: {0}")]
     Engine(String),
 
+    /// Shown to the user as-is, so the message carries its own wording.
+    #[error("{0}")]
+    DiskFull(String),
+
     #[error("Validation error: {0}")]
     Validation(String),
 
@@ -37,6 +41,10 @@ pub enum AppError {
 
     #[error("Cancelled")]
     Cancelled,
+
+    /// The engine process ended mid-job. `engine_host` turns this into a readable message.
+    #[error("The speech engine stopped ({})", crate::engine_host::describe(*.0))]
+    EngineDied(crate::engine_host::Exit),
 
     #[error("{0}")]
     Other(String),
@@ -65,13 +73,8 @@ macro_rules! impl_from {
 
 impl_from!(Path: walkdir::Error);
 impl_from!(
-    Audio: symphonia::core::errors::Error,
-    rubato::ResamplerConstructionError,
-    rubato::ResampleError,
-    hound::Error,
-    cpal::DefaultStreamConfigError,
-    cpal::BuildStreamError,
-    cpal::PlayStreamError,
+    Audio: hound::Error,
+    cpal::Error,
 );
 impl_from!(
     Other: tauri::Error,

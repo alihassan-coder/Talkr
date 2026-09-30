@@ -1,39 +1,39 @@
-use std::sync::Arc;
 use chrono::Utc;
+use talkr_protocol::{Event, ModelRef, Op, SynthesizeJob, Voice};
 use tauri::{command, AppHandle, Manager, State};
 use uuid::Uuid;
-use crate::audio::wav;
 use crate::catalog::ModelKind;
 use crate::commands::models::locate_model;
-use crate::commands::{finish_job, job_control, to_stored_path, EVENT_TTS_DONE};
+use crate::commands::{catch_panic, ensure_memory_for_model, finish_job, progress_emitter, to_stored_path, EVENT_TTS_DONE};
 use crate::db::{insert_history, HistoryItem, HistoryKind};
-use crate::engines::tts_sherpa::SherpaTtsEngine;
-use crate::engines::{JobControl, TtsEngine, TtsOptions, Voice};
+use crate::engine_host::failure_to_error;
 use crate::error::{AppError, Result};
 use crate::AppState;
 
-/// Get the cached TTS engine for `model_id`, loading it if needed. Blocking.
-pub(crate) fn load_tts(state: &AppState, model_id: &str) -> Result<Arc<dyn TtsEngine>> {
-    let mut engines = state.engines();
-    if let Some(engine) = engines.get_tts(model_id) {
-        return Ok(engine);
-    }
+/// Resolve an installed text-to-speech model for the engine.
+fn tts_model(state: &AppState, model_id: &str) -> Result<ModelRef> {
     let (kind, dir) = locate_model(&state.paths, model_id)
         .filter(|(_, dir)| dir.join("manifest.json").is_file())
         .ok_or_else(|| AppError::NotFound(format!("Model not installed: {}", model_id)))?;
     if kind != ModelKind::Tts {
         return Err(AppError::Validation(format!("{} is not a text-to-speech model", model_id)));
     }
-    let engine: Arc<dyn TtsEngine> = Arc::new(SherpaTtsEngine::new(&dir, model_id.to_string(), state.cpu_threads())?);
-    engines.set_tts(engine.clone());
-    Ok(engine)
+    ensure_memory_for_model(&dir, model_id)?;
+    // TTS models are small and fast on the CPU; sherpa-onnx's prebuilt libraries are CPU-only.
+    Ok(ModelRef { model_id: model_id.to_string(), dir, threads: state.cpu_threads(), gpu: false })
 }
 
 #[command]
 pub async fn list_voices(app: AppHandle, model_id: String) -> Result<Vec<Voice>> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        Ok(load_tts(&state, &model_id)?.voices())
+        let model = tts_model(&state, &model_id)?;
+        let id = Uuid::new_v4().to_string();
+        match state.engine.run(&id, &|_| Op::Voices(model.clone()), false, &|_| {})? {
+            Event::Voices { voices, .. } => Ok(voices),
+            Event::Failed { kind, error, .. } => Err(failure_to_error(kind, error)),
+            other => Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
+        }
     })
     .await?
 }
@@ -49,20 +49,22 @@ pub async fn synthesize(
     voice_id: String,
     speed: Option<f32>,
 ) -> Result<String> {
+    // sherpa-rs turns the text into a C string and panics on a NUL byte (text pasted from a PDF
+    // can carry one).
+    let text = text.replace('\0', "");
     if text.trim().is_empty() {
         return Err(AppError::Validation("Text is empty".into()));
     }
     let speed = speed.unwrap_or_else(|| state.settings().speech_rate);
 
     let job_id = Uuid::new_v4().to_string();
-    let cancel = state.jobs.register(&job_id);
-    let ctl = job_control(&app, &job_id, cancel);
+    state.jobs.register(&job_id);
 
     let job_app = app.clone();
     let job = job_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = job_app.state::<AppState>();
-        let result = run_synthesis(&state, &ctl, &job, &text, &model_id, &voice_id, speed);
+        let result = catch_panic(|| run_synthesis(&job_app, &state, &job, &text, &model_id, &voice_id, speed));
         finish_job(&job_app, &state, &job, EVENT_TTS_DONE, result);
     });
 
@@ -70,8 +72,8 @@ pub async fn synthesize(
 }
 
 fn run_synthesis(
+    app: &AppHandle,
     state: &AppState,
-    ctl: &JobControl,
     job_id: &str,
     text: &str,
     model_id: &str,
@@ -79,29 +81,29 @@ fn run_synthesis(
     speed: f32,
 ) -> Result<HistoryItem> {
     let start = std::time::Instant::now();
-    ctl.progress(0.0);
-    let tts = load_tts(state, model_id)?;
-    if ctl.is_cancelled() {
+    let progress = progress_emitter(app, job_id);
+    progress(0.0);
+    let model = tts_model(state, model_id)?;
+    if state.jobs.is_cancelled(job_id) {
         return Err(AppError::Cancelled);
-    }
-
-    let opts = TtsOptions {
-        voice_id: voice_id.to_string(),
-        speed,
-    };
-    let audio = tts.synthesize(text, &opts, ctl)?;
-    if audio.samples.is_empty() || audio.sample_rate == 0 {
-        return Err(AppError::Engine("Engine produced no audio".into()));
     }
 
     let paths = &state.paths;
     let audio_path = paths.audio_path("wav");
-    if let Some(parent) = audio_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    wav::write_wav(&audio_path, &audio.samples, audio.sample_rate)?;
-
-    let duration_ms = (audio.samples.len() as f64 / audio.sample_rate as f64 * 1000.0) as i64;
+    let make_op = |_gpu: bool| {
+        Op::Synthesize(SynthesizeJob {
+            model: model.clone(),
+            text: text.to_string(),
+            voice_id: voice_id.to_string(),
+            speed,
+            out_path: audio_path.clone(),
+        })
+    };
+    let (duration_ms, device) = match state.engine.run(job_id, &make_op, false, &progress)? {
+        Event::Synthesized { duration_ms, device, .. } => (duration_ms, device),
+        Event::Failed { kind, error, .. } => return Err(failure_to_error(kind, error)),
+        other => return Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
+    };
     let title = make_title(text);
 
     let item = HistoryItem {
@@ -115,7 +117,7 @@ fn run_synthesis(
         model_id: model_id.to_string(),
         voice_id: Some(voice_id.to_string()),
         language: None,
-        device: "cpu".into(),
+        device,
         processing_ms: start.elapsed().as_millis() as i64,
         favorite: false,
         segments_json: None,

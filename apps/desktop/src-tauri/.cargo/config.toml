@@ -1,0 +1,10 @@
+# The cmake crate replaces CMake's per-configuration flags with the cc crate's, which carry no
+# optimization level on MSVC, so whisper.cpp was compiled unoptimized (/Od) and ran 10-20x
+# slower. whisper-rs-sys passes CMAKE_* variables through to CMake. The dash spelling works for
+# MSVC, GCC and Clang alike. (whisper-rs-sys doesn't rebuild when these change: run
+# `cargo clean -p whisper-rs-sys` after editing them, and bump the CI cache keys.)
+[env]
+CMAKE_C_FLAGS_RELEASE = "-O2 -DNDEBUG"
+CMAKE_CXX_FLAGS_RELEASE = "-O2 -DNDEBUG"
+CMAKE_C_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"
+CMAKE_CXX_FLAGS_RELWITHDEBINFO = "-O2 -DNDEBUG"

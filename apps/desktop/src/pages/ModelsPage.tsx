@@ -8,12 +8,15 @@ import { cx } from '@/lib/cx'
 import { type ActiveDownload, initModels, useModels } from '@/stores/models'
 import { toast, toastError } from '@/stores/toast'
 import {
+  COMPRESSED_HINT,
   backendLabel,
+  compressedAlternative,
   describeLanguages,
   formatBytes,
   formatRam,
   formatSpeed,
   isAccelerated,
+  isCompressed,
   isRecommended,
   primaryGpu,
   shortCpuName,
@@ -38,6 +41,7 @@ export function ModelsPage() {
   const installed = useModels((s) => s.installed)
   const installedIds = useModels((s) => s.installedIds)
   const downloads = useModels((s) => s.downloads)
+  const failures = useModels((s) => s.failures)
   const hardware = useModels((s) => s.hardware)
   const modelsBytes = useModels((s) => s.modelsBytes)
   const loading = useModels((s) => s.loading)
@@ -104,6 +108,8 @@ export function ModelsPage() {
                   model={model}
                   installed={isInstalled(model)}
                   download={downloads[model.id]}
+                  failure={failures[model.id]}
+                  alternative={compressedAlternative(model, catalog)}
                   hardware={hardware}
                 />
               ))}
@@ -192,14 +198,19 @@ function ModelRow({
   model,
   installed,
   download,
+  failure,
+  alternative,
   hardware,
 }: {
   model: CatalogModel
   installed: boolean
   download: ActiveDownload | undefined
+  failure: string | undefined
+  alternative: CatalogModel | null
   hardware: HardwareInfo | null
 }) {
   const startDownload = useModels((s) => s.download)
+  const dismissFailure = useModels((s) => s.dismissFailure)
   const cancel = useModels((s) => s.cancel)
   const remove = useModels((s) => s.remove)
   const { base, variant } = splitName(model.name)
@@ -213,6 +224,7 @@ function ModelRow({
           <span className="font-medium tracking-[-0.01em]">{base}</span>
           {variant ? <span className="text-muted">{variant}</span> : null}
           {isRecommended(model) ? <Badge solid>Recommended</Badge> : null}
+          {isCompressed(model) ? <Badge>{COMPRESSED_HINT}</Badge> : null}
           {tags.map((tag) => (
             <Badge key={tag}>{tag}</Badge>
           ))}
@@ -226,7 +238,26 @@ function ModelRow({
             <TriangleAlert className="size-3.5 shrink-0" strokeWidth={1.75} />
             Needs more memory than this computer has
             <span className="font-mono text-[11px] text-subtle">{formatBytes(model.ramRecommendedBytes)} recommended</span>
+            {alternative && hardware && alternative.ramRecommendedBytes <= hardware.ramBytes ? (
+              <span>· the compressed version fits</span>
+            ) : null}
           </p>
+        ) : null}
+        {failure && !download ? (
+          <div role="alert" className="mt-2 flex items-start gap-1.5 text-[12.5px] leading-relaxed text-fg">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-accent" strokeWidth={1.75} />
+            <span data-selectable className="min-w-0 flex-1">
+              {failure}
+            </span>
+            <button
+              type="button"
+              onClick={() => dismissFailure(model.id)}
+              aria-label="Dismiss error"
+              className="grid size-5 shrink-0 place-items-center rounded text-subtle transition-colors hover:bg-fg/[0.06] hover:text-fg"
+            >
+              <X className="size-3" strokeWidth={2} />
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -244,7 +275,7 @@ function ModelRow({
             icon={<Download className="size-3.5" strokeWidth={1.75} />}
             onClick={() => void startDownload(model.id)}
           >
-            Download
+            {failure ? 'Try again' : 'Download'}
             <span className="font-mono text-[11px] text-subtle">{formatBytes(model.sizeBytes)}</span>
           </Button>
         )}

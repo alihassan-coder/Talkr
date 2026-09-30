@@ -18,11 +18,12 @@ const checks = [
 ]
 
 const requirements = [
-  { term: 'Windows', detail: '10 or later, x64' },
-  { term: 'macOS', detail: '11 Big Sur or later. Apple Silicon for GPU acceleration' },
-  { term: 'Linux', detail: 'glibc 2.31 or later. NVIDIA (CUDA 12+) or any Vulkan 1.2 GPU for acceleration' },
-  { term: 'Memory', detail: '4 GB for the small models, 8 GB or more for Whisper Medium and Large' },
-  { term: 'Disk', detail: 'About 8 to 15 MB for the app (the Linux AppImage is about 100 MB), plus 50 MB to 1.6 GB per model' },
+  { term: 'Windows', detail: '10 or later, x64. Any Vulkan GPU (NVIDIA, AMD or Intel) speeds up transcription' },
+  { term: 'macOS', detail: '11 Big Sur or later. Apple Silicon speeds up transcription with Metal' },
+  { term: 'Linux', detail: 'glibc 2.31 or later. Any Vulkan GPU (NVIDIA, AMD or Intel) speeds up transcription' },
+  { term: 'GPU', detail: 'Optional. Without one, everything runs on the CPU. Text to speech always does' },
+  { term: 'Memory', detail: '4 GB with the compressed Whisper models, 8 GB or more for Whisper Medium and Large' },
+  { term: 'Disk', detail: 'About 8 to 15 MB for the app (the Linux AppImage is about 100 MB), plus 60 MB to 1.6 GB per model' },
 ]
 
 export default function DownloadPage() {

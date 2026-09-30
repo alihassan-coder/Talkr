@@ -36,22 +36,43 @@ pub async fn get_storage_usage(state: State<'_, AppState>) -> Result<StorageUsag
 #[command]
 pub async fn run_retention(state: State<'_, AppState>) -> Result<usize> {
     let days = state.settings().history_retention_days;
-    let deleted = prune_old_history(&state.paths, days)?;
-    remove_owned_audio(&state.paths, &deleted.audio_paths);
-    Ok(deleted.count)
+    let paths = state.paths.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let deleted = prune_old_history(&paths, days)?;
+        remove_owned_audio(&paths, &deleted.audio_paths);
+        Ok(deleted.count)
+    })
+    .await?
 }
 
+/// Total size of the files under `path`. Entries that vanish or cannot be read mid-walk (a
+/// download finishing, a file in use) are skipped rather than failing the whole count.
 fn dir_size(path: &std::path::Path) -> Result<u64> {
     if !path.exists() {
         return Ok(0);
     }
 
-    let mut size = 0u64;
-    for entry in walkdir::WalkDir::new(path) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            size += entry.metadata()?.len();
-        }
-    }
+    let size = walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum();
     Ok(size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dir_size_sums_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a"), [0u8; 10]).unwrap();
+        std::fs::create_dir_all(dir.path().join("x").join("y")).unwrap();
+        std::fs::write(dir.path().join("x").join("y").join("b"), [0u8; 32]).unwrap();
+        assert_eq!(dir_size(dir.path()).unwrap(), 42);
+        assert_eq!(dir_size(&dir.path().join("missing")).unwrap(), 0);
+    }
 }

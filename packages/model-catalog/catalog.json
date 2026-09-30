@@ -8,14 +8,14 @@
       "name": "Whisper Tiny (English)",
       "description": "Fastest English transcription, lower accuracy. Good for quick drafts.",
       "languages": ["en"],
-      "sizeBytes": 76957065,
+      "sizeBytes": 77704715,
       "ramRecommendedBytes": 500000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+          "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
         }
       ],
       "tags": ["fast", "english"]
@@ -27,14 +27,14 @@
       "name": "Whisper Base (English)",
       "description": "Fast and accurate English transcription. Good default for most users.",
       "languages": ["en"],
-      "sizeBytes": 147951465,
+      "sizeBytes": 147964211,
       "ramRecommendedBytes": 1000000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+          "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
         }
       ],
       "tags": ["recommended", "fast", "english"]
@@ -46,17 +46,36 @@
       "name": "Whisper Small (English)",
       "description": "More accurate English transcription, slower. Good for important recordings.",
       "languages": ["en"],
-      "sizeBytes": 488153133,
+      "sizeBytes": 487614201,
       "ramRecommendedBytes": 2000000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
+          "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
         }
       ],
       "tags": ["accurate", "english"]
+    },
+    {
+      "id": "whisper-small-en-q5",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Small (English) (compressed)",
+      "description": "More accurate English transcription in a compressed 5-bit build. About half the memory of Whisper Small (English); a good fit for 4 GB machines.",
+      "languages": ["en"],
+      "sizeBytes": 190098681,
+      "ramRecommendedBytes": 1200000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en-q5_1.bin",
+          "sha256": "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30"
+        }
+      ],
+      "tags": ["accurate", "english", "quantized", "low-memory"]
     },
     {
       "id": "whisper-base",
@@ -71,11 +90,30 @@
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+          "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
         }
       ],
       "tags": ["multilingual", "recommended"]
+    },
+    {
+      "id": "whisper-base-q5",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Base (Multilingual) (compressed)",
+      "description": "Multilingual transcription, 50+ languages, in a compressed 5-bit build. About half the memory of Whisper Base with a small accuracy trade-off.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 59707625,
+      "ramRecommendedBytes": 600000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base-q5_1.bin",
+          "sha256": "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
+        }
+      ],
+      "tags": ["multilingual", "quantized", "low-memory"]
     },
     {
       "id": "whisper-small",
@@ -84,17 +122,36 @@
       "name": "Whisper Small (Multilingual)",
       "description": "More accurate multilingual transcription. Good for non-English content.",
       "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
-      "sizeBytes": 488153133,
+      "sizeBytes": 487601967,
       "ramRecommendedBytes": 2000000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+          "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
         }
       ],
       "tags": ["multilingual", "accurate"]
+    },
+    {
+      "id": "whisper-small-q5",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Small (Multilingual) (compressed)",
+      "description": "More accurate multilingual transcription in a compressed 5-bit build. About half the memory of Whisper Small; a good fit for 4 GB machines.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 190085487,
+      "ramRecommendedBytes": 1200000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
+          "sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
+        }
+      ],
+      "tags": ["multilingual", "accurate", "quantized", "low-memory"]
     },
     {
       "id": "whisper-medium",
@@ -103,14 +160,14 @@
       "name": "Whisper Medium (Multilingual)",
       "description": "High accuracy multilingual transcription. Requires GPU or lots of RAM.",
       "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
-      "sizeBytes": 1547890245,
+      "sizeBytes": 1533763059,
       "ramRecommendedBytes": 5000000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-medium.bin",
+          "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"
         }
       ],
       "tags": ["multilingual", "accurate", "gpu-recommended"]
@@ -122,17 +179,36 @@
       "name": "Whisper Large v3 Turbo (Multilingual)",
       "description": "Best quality multilingual transcription. Requires GPU and 8GB+ VRAM.",
       "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
-      "sizeBytes": 1628996489,
+      "sizeBytes": 1624555275,
       "ramRecommendedBytes": 8000000000,
       "license": "MIT",
       "homepage": "https://github.com/openai/whisper",
       "files": [
         {
-          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
-          "sha256": "PLACEHOLDER_SHA256"
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo.bin",
+          "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
         }
       ],
       "tags": ["multilingual", "best-quality", "gpu-required"]
+    },
+    {
+      "id": "whisper-large-v3-turbo-q5",
+      "kind": "stt",
+      "engine": "whisper",
+      "name": "Whisper Large v3 Turbo (Multilingual) (compressed)",
+      "description": "Near best-quality multilingual transcription in a compressed 5-bit build. Far less memory than the full Large v3 Turbo; GPU recommended.",
+      "languages": ["auto", "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"],
+      "sizeBytes": 574041195,
+      "ramRecommendedBytes": 3000000000,
+      "license": "MIT",
+      "homepage": "https://github.com/openai/whisper",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+          "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
+        }
+      ],
+      "tags": ["multilingual", "best-quality", "quantized", "gpu-recommended"]
     },
     {
       "id": "kokoro-multi-lang-v1_0",
@@ -141,14 +217,14 @@
       "name": "Kokoro Multi-language",
       "description": "High-quality multi-voice, multi-language TTS. Apache-2.0 licensed.",
       "languages": ["en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh"],
-      "sizeBytes": 335544320,
+      "sizeBytes": 349906910,
       "ramRecommendedBytes": 1000000000,
       "license": "Apache-2.0",
       "homepage": "https://github.com/k2-fsa/sherpa-onnx",
       "files": [
         {
           "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "sha256": "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298",
           "archive": "tar.bz2"
         }
       ],
@@ -161,14 +237,14 @@
       "name": "Kokoro English",
       "description": "Lightweight English-only Kokoro model. Fast and natural.",
       "languages": ["en"],
-      "sizeBytes": 83886080,
+      "sizeBytes": 319625534,
       "ramRecommendedBytes": 500000000,
       "license": "Apache-2.0",
       "homepage": "https://github.com/k2-fsa/sherpa-onnx",
       "files": [
         {
           "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "sha256": "912804855a04745fa77a30be545b3f9a5d15c4d66db00b88cbcd4921df605ac7",
           "archive": "tar.bz2"
         }
       ],
@@ -181,14 +257,14 @@
       "name": "Piper English (Lessac, Medium)",
       "description": "Fast, lightweight English voice. Includes espeak-ng-data (GPL).",
       "languages": ["en"],
-      "sizeBytes": 52428800,
+      "sizeBytes": 67230653,
       "ramRecommendedBytes": 300000000,
       "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
       "homepage": "https://github.com/rhasspy/piper",
       "files": [
         {
           "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "sha256": "9e3febfacf0abf4270172d2958bcec246032b7e88efc2720840cc80c93de334e",
           "archive": "tar.bz2"
         }
       ],
@@ -201,14 +277,14 @@
       "name": "Piper English UK (Alan, Medium)",
       "description": "British English voice. Includes espeak-ng-data (GPL).",
       "languages": ["en-GB"],
-      "sizeBytes": 52428800,
+      "sizeBytes": 67220121,
       "ramRecommendedBytes": 300000000,
       "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
       "homepage": "https://github.com/rhasspy/piper",
       "files": [
         {
           "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alan-medium.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "sha256": "a48d4017da0f77668b27bed63fe6e04dd64c6397e1fadad4f460efb0ef7c9012",
           "archive": "tar.bz2"
         }
       ],
@@ -221,34 +297,34 @@
       "name": "Piper German (Thorsten, Medium)",
       "description": "German voice. Includes espeak-ng-data (GPL).",
       "languages": ["de"],
-      "sizeBytes": 52428800,
+      "sizeBytes": 67214254,
       "ramRecommendedBytes": 300000000,
       "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
       "homepage": "https://github.com/rhasspy/piper",
       "files": [
         {
           "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-de_DE-thorsten-medium.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "sha256": "50487d9c95fdf2191f31d2588569381063ba1591dcd4c7d4bdd30f12b2191714",
           "archive": "tar.bz2"
         }
       ],
       "tags": ["fast", "german", "lightweight", "piper"]
     },
     {
-      "id": "piper-fr_FR-gilles-medium",
+      "id": "piper-fr_FR-siwis-medium",
       "kind": "tts",
       "engine": "sherpa-onnx",
-      "name": "Piper French (Gilles, Medium)",
+      "name": "Piper French (Siwis, Medium)",
       "description": "French voice. Includes espeak-ng-data (GPL).",
       "languages": ["fr"],
-      "sizeBytes": 52428800,
+      "sizeBytes": 67207459,
       "ramRecommendedBytes": 300000000,
       "license": "MIT (model) / GPL-3.0 (espeak-ng-data)",
       "homepage": "https://github.com/rhasspy/piper",
       "files": [
         {
-          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-gilles-medium.tar.bz2",
-          "sha256": "PLACEHOLDER_SHA256",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fr_FR-siwis-medium.tar.bz2",
+          "sha256": "375909aa30842b3a4efa10b1beb1d761af792960ae6873b4d53889f96c66195b",
           "archive": "tar.bz2"
         }
       ],

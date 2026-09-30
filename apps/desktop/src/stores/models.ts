@@ -19,6 +19,7 @@ import type {
   InstalledModel,
   ModelKind,
 } from '@/lib/types'
+import { errorText } from '@/lib/errors'
 import { toast, toastError } from '@/stores/toast'
 import sampleCatalog from '../../../../packages/model-catalog/catalog.json'
 
@@ -38,6 +39,8 @@ type ModelsState = {
   installed: InstalledModel[]
   installedIds: string[]
   downloads: Record<string, ActiveDownload>
+  /** Why the last download of a model failed (e.g. "Not enough disk space…"), until it is retried. */
+  failures: Record<string, string>
   hardware: HardwareInfo | null
   modelsBytes: number | null
   loading: boolean
@@ -48,6 +51,7 @@ type ModelsState = {
   cancel: (modelId: string) => Promise<void>
   remove: (modelId: string) => Promise<void>
   importModel: (path: string, kind: ModelKind) => Promise<void>
+  dismissFailure: (modelId: string) => void
 }
 
 /** Bundled catalog, so the screen can be previewed in a plain browser. */
@@ -59,7 +63,12 @@ const previewCatalog = (): CatalogModel[] =>
     installedVersion: null,
   }))
 
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const withoutKey = <T>(record: Record<string, T>, key: string) => {
+  if (!(key in record)) return record
+  const next = { ...record }
+  delete next[key]
+  return next
+}
 
 // Jobs the user cancelled: late progress events for them are ignored.
 const cancelledJobs = new Set<string>()
@@ -79,6 +88,7 @@ export const useModels = create<ModelsState>((set, get) => {
     installed: [],
     installedIds: [],
     downloads: {},
+    failures: {},
     hardware: null,
     modelsBytes: null,
     loading: false,
@@ -108,7 +118,7 @@ export const useModels = create<ModelsState>((set, get) => {
           loaded: true,
         })
       } catch (e) {
-        set({ loading: false, loaded: true, error: errorMessage(e) })
+        set({ loading: false, loaded: true, error: errorText(e) })
       }
     },
 
@@ -119,6 +129,7 @@ export const useModels = create<ModelsState>((set, get) => {
       }
       if (get().downloads[modelId]) return
       set((s) => ({
+        failures: withoutKey(s.failures, modelId),
         downloads: {
           ...s.downloads,
           [modelId]: { jobId: null, progress: null, bytesDone: 0, bytesTotal: 0, speed: 0, state: 'queued' },
@@ -131,7 +142,9 @@ export const useModels = create<ModelsState>((set, get) => {
           return current ? { downloads: { ...s.downloads, [modelId]: { ...current, jobId } } } : {}
         })
       } catch (e) {
+        // Checks that fail before the job starts, e.g. "Not enough disk space…".
         dropDownload(modelId)
+        set((s) => ({ failures: { ...s.failures, [modelId]: errorText(e) } }))
         toastError(e)
       }
     },
@@ -159,6 +172,8 @@ export const useModels = create<ModelsState>((set, get) => {
       }
       await get().refresh()
     },
+
+    dismissFailure: (modelId) => set((s) => ({ failures: withoutKey(s.failures, modelId) })),
 
     importModel: async (path, kind) => {
       try {
@@ -193,10 +208,13 @@ function handleProgress(p: DownloadProgress) {
       toast(`${name} is ready`)
       void getState().refresh()
       return
-    case 'failed':
+    case 'failed': {
       drop()
-      toastError(p.error ? `${name}: ${p.error}` : `${name} failed to download`)
+      const reason = p.error ? errorText(p.error) : 'The download failed.'
+      setState((s) => ({ failures: { ...s.failures, [p.modelId]: reason } }))
+      toastError(`${name}: ${reason}`)
       return
+    }
     case 'cancelled':
       drop()
       return

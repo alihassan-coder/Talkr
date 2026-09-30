@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: '%s · Talkr',
   },
   description:
-    'Turn text into speech and speech into text on your own computer. Whisper, Kokoro and Piper run locally on your GPU. Free, open source, no account.',
+    'Turn text into speech and speech into text on your own computer. Whisper, Kokoro and Piper run locally on your computer. Free, open source, no account.',
   openGraph: {
     title: 'Talkr: speech tools that never phone home',
     description: 'Text to speech and speech to text, running entirely on your own machine.',
