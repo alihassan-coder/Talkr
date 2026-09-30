@@ -11,7 +11,7 @@
 //   TALKR_NATIVE=1       tune whisper.cpp for this machine's CPU (never for builds you share).
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, parse } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const tauriDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src-tauri')
@@ -47,14 +47,21 @@ function buildEnv() {
   return env
 }
 
+// The Vulkan backend configures a nested CMake project (its shader generator) deep inside
+// target/, and MSBuild's file tracker fails past Windows' 260-character path limit. Build the
+// Windows GPU engine in a short target folder instead.
+const gpuTargetDir =
+  isWindows && (process.env.CARGO_TARGET_DIR ?? targetDir).length > 24 ? join(parse(tauriDir).root, 'talkr-vk') : targetDir
+
 function cargoBuild(features) {
   const cargoArgs = ['build', '-p', 'talkr-engine', '--locked']
   if (!debug) cargoArgs.push('--release')
   if (crossTarget) cargoArgs.push('--target', crossTarget)
   if (features) cargoArgs.push('--features', features)
-  console.log(`[build-engine] cargo ${cargoArgs.join(' ')}`)
-  execFileSync('cargo', cargoArgs, { cwd: tauriDir, env: buildEnv(), stdio: 'inherit' })
-  return join(outDir, `talkr-engine${exe}`)
+  const dir = features === 'vulkan' ? gpuTargetDir : targetDir
+  console.log(`[build-engine] cargo ${cargoArgs.join(' ')} (target dir ${dir})`)
+  execFileSync('cargo', cargoArgs, { cwd: tauriDir, env: { ...buildEnv(), CARGO_TARGET_DIR: dir }, stdio: 'inherit' })
+  return join(dir, ...(crossTarget ? [crossTarget] : []), debug ? 'debug' : 'release', `talkr-engine${exe}`)
 }
 
 function install(built, name) {

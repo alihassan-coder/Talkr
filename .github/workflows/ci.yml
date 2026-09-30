@@ -162,6 +162,8 @@ jobs:
         shell: bash
         run: |
           vulkaninfo --summary || vulkaninfoSDK --summary || true
-          export LD_LIBRARY_PATH="$PWD/target/debug:${LD_LIBRARY_PATH:-}"
-          export PATH="$PWD/target/debug:$PATH"
+          # Same short target folder build-engine.mjs uses on Windows (MAX_PATH, see there).
+          if [ "$RUNNER_OS" = "Windows" ]; then export CARGO_TARGET_DIR=D:/talkr-vk; else export CARGO_TARGET_DIR="$PWD/target"; fi
+          export LD_LIBRARY_PATH="$CARGO_TARGET_DIR/debug:${LD_LIBRARY_PATH:-}"
+          export PATH="$CARGO_TARGET_DIR/debug:$PATH"
           cargo test -p talkr-engine --features vulkan --locked -- --nocapture
