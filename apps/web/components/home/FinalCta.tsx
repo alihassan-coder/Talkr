@@ -11,7 +11,7 @@ export function FinalCta() {
         <h2 className="mx-auto mt-8 max-w-2xl text-balance text-4xl font-semibold leading-[1.02] tracking-[-0.045em] md:text-6xl">
           Your voice stays yours. <span className="text-fg/40">Starting now.</span>
         </h2>
-        <p className="mx-auto mt-5 max-w-md text-lg text-fg/55">Free for everyone. An 8 MB download. No sign-up screen, ever.</p>
+        <p className="mx-auto mt-5 max-w-md text-lg text-fg/55">Free for everyone. A 15 MB download. No sign-up screen, ever.</p>
         <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <DownloadButton />
           <a

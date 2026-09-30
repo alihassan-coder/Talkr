@@ -246,7 +246,14 @@ impl EngineHost {
             return devices;
         }
         let probe_on_gpu = self.gpu_available();
-        let devices = match self.run_once("probe", &|_| Op::Probe, probe_on_gpu, &|_| {}) {
+        let mut answer = self.run_once("probe", &|_| Op::Probe, probe_on_gpu, &|_| {});
+        if probe_on_gpu && matches!(answer, Err(AppError::EngineDied(_))) {
+            // The GPU engine can't start or crashed on start-up (no Vulkan loader, bad driver):
+            // remember that, and still report what the CPU engine can do.
+            self.mark_gpu_failed();
+            answer = self.run_once("probe", &|_| Op::Probe, false, &|_| {});
+        }
+        let devices = match answer {
             Ok(Event::Devices { devices, .. }) => devices,
             _ => Vec::new(),
         };
@@ -738,6 +745,15 @@ mod tests {
         assert!(!host.should_use_gpu(GpuPolicy::Never));
         let (cpu_only, _, _) = make_host(FakeLauncher::new(Script::Healthy, None));
         assert!(!cpu_only.should_use_gpu(GpuPolicy::Prefer));
+    }
+
+    #[test]
+    fn probing_falls_back_to_the_cpu_when_the_gpu_engine_cannot_start() {
+        let (host, launches, _) = make_host(FakeLauncher::new(Script::Healthy, Some(Script::WontStart)));
+        let devices = host.devices();
+        assert!(!devices.is_empty(), "the CPU engine answered the probe");
+        assert!(host.gpu_failed());
+        assert_eq!(*lock(&launches), vec![Variant::Cpu]);
     }
 
     #[test]

@@ -23,7 +23,7 @@ const requirements = [
   { term: 'Linux', detail: 'glibc 2.31 or later. Any Vulkan GPU (NVIDIA, AMD or Intel) speeds up transcription' },
   { term: 'GPU', detail: 'Optional. Without one, everything runs on the CPU. Text to speech always does' },
   { term: 'Memory', detail: '4 GB with the compressed Whisper models, 8 GB or more for Whisper Medium and Large' },
-  { term: 'Disk', detail: 'About 8 to 15 MB for the app (the Linux AppImage is about 100 MB), plus 60 MB to 1.6 GB per model' },
+  { term: 'Disk', detail: 'About 12 to 31 MB for the app (the Linux AppImage is about 110 MB), plus 60 MB to 1.6 GB per model' },
 ]
 
 export default function DownloadPage() {
