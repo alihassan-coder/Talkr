@@ -5,11 +5,12 @@ import { Card } from '@/components/ui'
 import { Waveform } from '@/components/Waveform'
 import { speechBars } from '@/lib/waveform'
 import { toastError } from '@/stores/toast'
+import { useAudioUrl } from '@/lib/useAudioUrl'
 import { formatDuration } from './utils'
 
 /** Card with a custom player: a waveform that fills in as the audio plays. */
 export function AudioPlayer({
-  src,
+  path,
   seed,
   title,
   meta,
@@ -18,7 +19,7 @@ export function AudioPlayer({
   fallbackDurationMs = 0,
   autoPlay = false,
 }: {
-  src: string
+  path: string
   seed: number
   title: string
   meta: ReactNode
@@ -27,6 +28,7 @@ export function AudioPlayer({
   fallbackDurationMs?: number
   autoPlay?: boolean
 }) {
+  const { url, error } = useAudioUrl(path)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
@@ -46,6 +48,10 @@ export function AudioPlayer({
 
   const bars = speechBars(140, { seed, phrases: 4 })
   const ratio = duration > 0 ? Math.min(1, time / duration) : 0
+
+  useEffect(() => {
+    if (error) toastError(error)
+  }, [error])
 
   const toggle = () => {
     const audio = audioRef.current
@@ -97,6 +103,7 @@ export function AudioPlayer({
         <button
           type="button"
           onClick={toggle}
+          disabled={!url}
           aria-label={playing ? 'Pause' : 'Play'}
           className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint hover:scale-[1.04] active:scale-95"
         >
@@ -129,7 +136,7 @@ export function AudioPlayer({
 
       <audio
         ref={audioRef}
-        src={src}
+        src={url ?? undefined}
         autoPlay={autoPlay}
         preload="metadata"
         onPlay={() => setPlaying(true)}
@@ -142,7 +149,11 @@ export function AudioPlayer({
         onLoadedMetadata={(e) => {
           if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration)
         }}
-        onError={() => toastError('Could not load the audio file')}
+        onError={(event) => {
+          const mediaError = event.currentTarget.error
+          console.error('Could not decode the audio file', { code: mediaError?.code, message: mediaError?.message })
+          toastError('Could not decode the audio file')
+        }}
       />
     </Card>
   )

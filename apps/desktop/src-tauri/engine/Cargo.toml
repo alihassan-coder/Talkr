@@ -1,6 +1,6 @@
 [package]
 name = "talkr-engine"
-version = "0.1.3"
+version = "0.1.4"
 description = "Talkr's speech engine process (whisper.cpp and sherpa-onnx)"
 license = "MIT"
 edition = "2021"

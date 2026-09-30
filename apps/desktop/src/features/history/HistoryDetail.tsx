@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy, Download, Mic, Star, Trash2, Volume2, X } from 'lucide-react'
-import { audioSrc, historyDelete, historyExport, historyToggleFavorite, isTauri, parseSegments } from '@/lib/api'
+import { historyDelete, historyExport, historyToggleFavorite, isTauri, parseSegments } from '@/lib/api'
 import type { ExportFormat, HistoryItem } from '@/lib/types'
 import { Button, Card, IconButton, Kicker } from '@/components/ui'
 import { cx } from '@/lib/cx'
@@ -10,13 +10,11 @@ import { formatClock, formatDuration } from './utils'
 
 export function HistoryDetail({
   item,
-  home,
   onClose,
   onChange,
   onDeleted,
 }: {
   item: HistoryItem
-  home: string | null
   onClose: () => void
   onChange: (item: HistoryItem) => void
   onDeleted: (id: string) => void
@@ -114,10 +112,10 @@ export function HistoryDetail({
       </div>
 
       <div className="space-y-4 px-4 py-4">
-        {item.audioPath && home ? (
+        {item.audioPath ? (
           <AudioPlayer
             key={item.id}
-            src={audioSrc(home, item.audioPath)}
+            path={item.audioPath}
             seed={item.id}
             fallbackDurationMs={item.durationMs}
           />

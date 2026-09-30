@@ -27,6 +27,8 @@ beforeEach(() => {
   HTMLMediaElement.prototype.play = vi.fn(() => Promise.resolve())
   HTMLMediaElement.prototype.pause = vi.fn()
   HTMLMediaElement.prototype.load = vi.fn()
+  URL.createObjectURL = vi.fn(() => 'blob:talkr-audio')
+  URL.revokeObjectURL = vi.fn()
 })
 
 afterEach(async () => {

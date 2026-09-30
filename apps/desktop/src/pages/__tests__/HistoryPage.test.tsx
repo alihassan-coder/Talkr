@@ -30,6 +30,7 @@ function backendWith(list: HistoryItem[]) {
       return null
     },
     history_toggle_favorite: (args: Record<string, unknown>) => !current.find((i) => i.id === args.id)?.favorite,
+    read_audio_file: new ArrayBuffer(44),
   })
 }
 

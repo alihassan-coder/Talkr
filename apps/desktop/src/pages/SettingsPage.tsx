@@ -31,7 +31,7 @@ import { AppearanceSection } from '@/features/settings/Appearance'
 import { ComputeSection } from '@/features/settings/Compute'
 import { formatBytes } from '@/features/history/utils'
 
-const VERSION = '0.1.3'
+const VERSION = '0.1.4'
 const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 
 // Mirrors `Settings::default()` in config.rs; used as the browser preview.

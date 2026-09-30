@@ -110,10 +110,10 @@ describe('api helpers', () => {
     expect(api.parseSegments(historyFixture({ id: 'c', segmentsJson: '{oops' }))).toEqual([])
   })
 
-  it('builds audio URLs for relative and absolute paths', () => {
-    mockBackend()
-    expect(api.audioSrc('C:\\home\\', 'audio/a.wav')).toBe(`http://asset.localhost/${encodeURIComponent('C:\\home/audio/a.wav')}`)
-    expect(api.audioSrc('C:\\home', 'D:\\music\\b.wav')).toBe(`http://asset.localhost/${encodeURIComponent('D:\\music\\b.wav')}`)
-    expect(api.audioSrc('/home/me/.talkr', '/tmp/c.wav')).toBe(`http://asset.localhost/${encodeURIComponent('/tmp/c.wav')}`)
+  it('requests audio through binary IPC', async () => {
+    const bytes = new ArrayBuffer(4)
+    const backend = mockBackend({ read_audio_file: bytes })
+    await expect(api.readAudioFile({ path: 'audio/a.wav' })).resolves.toBe(bytes)
+    expect(backend.argsOf('read_audio_file')).toEqual([{ path: 'audio/a.wav' }])
   })
 })

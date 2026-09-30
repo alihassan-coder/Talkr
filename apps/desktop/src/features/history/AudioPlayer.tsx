@@ -4,9 +4,11 @@ import { Pause, Play } from 'lucide-react'
 import { Waveform } from '@/components/Waveform'
 import { speechBars } from '@/lib/waveform'
 import { formatClock, hashSeed } from './utils'
+import { useAudioUrl } from '@/lib/useAudioUrl'
 
 /** Minimal player: play/pause, a seekable waveform and mono time. Key it by item id to reset. */
-export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; seed: string; fallbackDurationMs: number | null }) {
+export function AudioPlayer({ path, seed, fallbackDurationMs }: { path: string; seed: string; fallbackDurationMs: number | null }) {
+  const { url, error } = useAudioUrl(path)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -14,7 +16,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
   const [failed, setFailed] = useState(false)
   const bars = speechBars(56, { seed: hashSeed(seed), phrases: 4 })
 
-  if (failed) {
+  if (failed || error) {
     return <p className="font-mono text-[11px] text-subtle">Audio file is not available.</p>
   }
 
@@ -40,7 +42,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
     <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-2.5 py-2">
       <audio
         ref={audioRef}
-        src={src}
+        src={url ?? undefined}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -54,6 +56,7 @@ export function AudioPlayer({ src, seed, fallbackDurationMs }: { src: string; se
       <button
         type="button"
         onClick={toggle}
+        disabled={!url}
         aria-label={playing ? 'Pause' : 'Play'}
         className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint active:scale-95"
       >

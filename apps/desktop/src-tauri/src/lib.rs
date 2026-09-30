@@ -186,6 +186,7 @@ pub fn run() {
             get_hardware_info,
             get_engine_status,
             get_app_paths,
+            read_audio_file,
             get_settings,
             update_settings,
             open_data_folder,
@@ -225,12 +226,6 @@ pub fn run() {
             }
 
             let state = app.state::<AppState>();
-
-            // tauri.conf.json can only name the default audio folder; allow the real one, which
-            // TALKR_HOME may have moved, so history playback works wherever the data lives.
-            if let Err(e) = app.asset_protocol_scope().allow_directory(&state.paths.audio, true) {
-                log::error!("Could not allow audio playback from {}: {}", state.paths.audio.display(), e);
-            }
 
             // Schema setup and retention run off the main thread so they never delay the window.
             // History calls made meanwhile are safe: every connection migrates first (db module),

@@ -1,9 +1,7 @@
 // Typed wrappers around the Talkr Tauri commands and events.
 // Commands reject with a string error message (the backend's AppError).
 
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
-
-export { convertFileSrc }
+import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
   AppPaths,
@@ -177,12 +175,5 @@ export const parseSegments = (item: HistoryItem): TranscriptSegment[] => {
   }
 }
 
-/**
- * URL for an <audio> element. `audioPath` is a HistoryItem.audioPath / RecordingResult.tempAudioPath
- * (relative to `home` from getAppPaths). Only files under ~/.talkr/audio are in the asset scope.
- */
-export const audioSrc = (home: string, audioPath: string) => {
-  const isAbsolute = /^([a-zA-Z]:[\\/]|[\\/])/.test(audioPath)
-  const full = isAbsolute ? audioPath : `${home.replace(/[\\/]+$/, '')}/${audioPath}`
-  return convertFileSrc(full)
-}
+/** Read Talkr-owned audio as raw bytes, avoiding custom-protocol media bugs in WebKitGTK. */
+export const readAudioFile = (args: { path: string }) => invoke<ArrayBuffer>('read_audio_file', args)

@@ -23,6 +23,7 @@ const handlers = (extra: Record<string, unknown> = {}) => ({
     { id: 'am_adam', name: 'Adam', language: 'en-US', gender: 'male' },
   ],
   synthesize: 'job-7',
+  read_audio_file: new ArrayBuffer(44),
   ...extra,
 })
 

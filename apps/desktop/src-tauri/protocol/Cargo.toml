@@ -1,6 +1,6 @@
 [package]
 name = "talkr-protocol"
-version = "0.1.3"
+version = "0.1.4"
 description = "Messages between the Talkr app and its engine process"
 license = "MIT"
 edition = "2021"

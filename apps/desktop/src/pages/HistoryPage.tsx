@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { History, LoaderCircle, Mic, Search, SearchX, Star, Volume2, X } from 'lucide-react'
-import { getAppPaths, historyList, historyToggleFavorite, isTauri } from '@/lib/api'
+import { historyList, historyToggleFavorite, isTauri } from '@/lib/api'
 import type { HistoryItem, HistoryKind } from '@/lib/types'
 import { Button, Card, EmptyState, IconButton, Kbd, Kicker, PageHeader, Segmented } from '@/components/ui'
 import { cx } from '@/lib/cx'
@@ -28,7 +28,6 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [home, setHome] = useState<string | null>(null)
 
   const filtered = query.trim() !== '' || kind !== 'all' || favoritesOnly
   const selected = items.find((i) => i.id === selectedId) ?? null
@@ -62,13 +61,6 @@ export function HistoryPage() {
       cancelled = true
     }
   }, [query, kind, favoritesOnly])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    getAppPaths()
-      .then((p) => setHome(p.home))
-      .catch(() => setHome(null))
-  }, [])
 
   // Ctrl+F focuses search, Esc clears it.
   useEffect(() => {
@@ -245,7 +237,6 @@ export function HistoryPage() {
               <HistoryDetail
                 key={selected.id}
                 item={selected}
-                home={home}
                 onClose={() => setSelectedId(null)}
                 onChange={replaceItem}
                 onDeleted={removeItem}

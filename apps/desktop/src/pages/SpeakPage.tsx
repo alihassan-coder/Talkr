@@ -5,8 +5,6 @@ import { Button, Card, EmptyState, Kbd, PageHeader, Progress } from '@/component
 import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import {
-  audioSrc,
-  getAppPaths,
   getSettings,
   historyExport,
   historyList,
@@ -37,7 +35,6 @@ export function SpeakPage() {
   const [voiceId, setVoiceId] = useState('')
   const [speed, setSpeed] = useState(1)
   const [text, setText] = useState('')
-  const [home, setHome] = useState('')
   const [current, setCurrent] = useState<{ item: HistoryItem; autoPlay: boolean } | null>(null)
   const [recent, setRecent] = useState<HistoryItem[]>([])
 
@@ -49,15 +46,14 @@ export function SpeakPage() {
   useEffect(() => {
     if (!tauri) return
     let alive = true
-    Promise.all([listInstalledModels(), getSettings(), getAppPaths(), fetchRecent()])
-      .then(([installed, settings, paths, items]) => {
+    Promise.all([listInstalledModels(), getSettings(), fetchRecent()])
+      .then(([installed, settings, items]) => {
         if (!alive) return
         const tts = installed.filter((m) => m.kind === 'tts')
         setModels(tts)
         setModelId((tts.find((m) => m.id === settings.defaultTtsModel) ?? tts[0])?.id ?? '')
         setDefaultVoice(settings.defaultVoice)
         setSpeed(settings.speechRate > 0 ? settings.speechRate : 1)
-        setHome(paths.home)
         setRecent(items)
       })
       .catch((err: unknown) => {
@@ -243,10 +239,10 @@ export function SpeakPage() {
         </Notice>
       ) : null}
 
-      {currentItem?.audioPath && home ? (
+      {currentItem?.audioPath ? (
         <AudioPlayer
           key={currentItem.id}
-          src={audioSrc(home, currentItem.audioPath)}
+          path={currentItem.audioPath}
           seed={currentItem.text.length}
           autoPlay={current?.autoPlay}
           fallbackDurationMs={currentItem.durationMs ?? 0}
