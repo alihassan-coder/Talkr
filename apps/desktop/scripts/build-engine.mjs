@@ -93,6 +93,18 @@ if (!isMac) {
 
 const cpu = cargoBuild()
 install(cpu, 'talkr-engine')
+
+// tauri.windows.conf.json bundles sherpa-onnx's DLLs from target/release, and tauri-build checks
+// those paths on every build, debug and `cargo check` included. A debug engine build leaves them
+// in target/debug, so mirror them into target/release when they're not there yet.
+if (isWindows && debug && !crossTarget) {
+  const release = join(targetDir, 'release')
+  mkdirSync(release, { recursive: true })
+  for (const dll of ['sherpa-onnx-c-api.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'cargs.dll']) {
+    const from = join(outDir, dll)
+    if (existsSync(from) && !existsSync(join(release, dll))) copyFileSync(from, join(release, dll))
+  }
+}
 if (!isMac && !gpuBuilt) {
   // Tauri needs every externalBin to exist. A CPU copy reports no GPU, so the app simply stays
   // on the CPU (see engine_host.rs).

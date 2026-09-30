@@ -49,6 +49,8 @@ jobs:
     env:
       # Real-model tests: Piper speaks a sentence and Whisper must hear it back.
       TALKR_TEST_MODELS: ${{ github.workspace }}/.test-models
+      # macOS engines always have Metal: run the GPU test there too (Apple Silicon runners).
+      TALKR_TEST_GPU: ${{ startsWith(matrix.os, 'macos') && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -94,13 +96,19 @@ jobs:
           cargo test --workspace --locked
 
   gpu-engine:
-    name: Rust - Vulkan engine build and GPU tests (Linux, software Vulkan)
-    runs-on: ubuntu-22.04
+    name: Rust - Vulkan engine build and GPU tests (${{ matrix.os }}, software Vulkan)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
     env:
       TALKR_TEST_MODELS: ${{ github.workspace }}/.test-models
       # Mesa's lavapipe driver runs Vulkan on the CPU, so the GPU code path is exercised for real
       # without a GPU on the runner.
       TALKR_TEST_GPU: '1'
+      # ggml skips CPU-type Vulkan devices such as lavapipe unless they are picked explicitly.
+      GGML_VK_VISIBLE_DEVICES: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -111,14 +119,17 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
           key: engine-vulkan-v2
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev libasound2-dev libvulkan-dev mesa-vulkan-drivers
-      - name: Install the Vulkan SDK
+      - name: Install the Vulkan SDK (and lavapipe on Windows)
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           cache: true
+          install_runtime: true
+          install_lavapipe: ${{ runner.os == 'Windows' }}
       - name: Cache test models
         uses: actions/cache@v4
         with:
@@ -132,7 +143,9 @@ jobs:
         run: node apps/desktop/scripts/build-engine.mjs --debug
       - name: GPU engine tests
         working-directory: apps/desktop/src-tauri
+        shell: bash
         run: |
-          vulkaninfo --summary || true
+          vulkaninfo --summary || vulkaninfoSDK --summary || true
           export LD_LIBRARY_PATH="$PWD/target/debug:${LD_LIBRARY_PATH:-}"
+          export PATH="$PWD/target/debug:$PATH"
           cargo test -p talkr-engine --features vulkan --locked -- --nocapture
