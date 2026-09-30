@@ -1,0 +1,59 @@
+name: Bug report
+description: Tell us what went wrong in Talkr
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to help improve Talkr. Please do not attach private audio or transcripts.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Tell us what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      placeholder: |
+        1. Open…
+        2. Choose…
+        3. See…
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Talkr version
+      placeholder: e.g. 0.1.3
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: OS version, CPU, GPU, and memory if relevant.
+      placeholder: e.g. Windows 11, Ryzen 7, RTX 3060, 16 GB RAM
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Which speech model were you using, if any?
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Add logs or screenshots after checking that they contain no private information.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed private data and secrets from this report.
+          required: true

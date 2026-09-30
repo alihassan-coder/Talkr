@@ -1,163 +1,71 @@
 # Talkr
 
-Free, private, offline desktop app for text-to-speech and speech-to-text. Run Whisper and Kokoro locally on your GPU or CPU. No account, no cloud, no telemetry.
+> Speech tools that never phone home.
 
-## Features
+[![MIT License](https://img.shields.io/badge/license-MIT-f5f5f5.svg)](LICENSE)
+[![CI](https://github.com/alihassan-coder/Talkr/actions/workflows/ci.yml/badge.svg)](https://github.com/alihassan-coder/Talkr/actions/workflows/ci.yml)
+[![Website](https://img.shields.io/badge/website-visit-8b5cf6.svg)](https://talkr-three.vercel.app/)
 
-- **Speak (Text → Speech):** Type or paste text, pick a voice, generate natural audio. Play it, save as WAV.
-- **Transcribe (Speech → Text):** Record from microphone or drop audio files (MP3, WAV, FLAC, OGG, M4A). Get text with timestamps.
-- **Model Library:** Browse open-source models, download with one click, delete anytime.
-- **100% Local:** Everything runs on your machine. Speech to text uses the GPU (Vulkan on Windows/Linux, Metal on macOS) and falls back to the CPU on its own.
-- **Crash-proof engines:** Whisper and sherpa-onnx run in a separate process. If a model runs out of memory or a GPU driver fails, the app stays open, explains what happened and restarts the engine.
-- **Low-memory friendly:** compressed (quantized) Whisper models and a free-memory check before loading.
-- **History:** Unlimited searchable history with favorites, export (TXT, SRT, WAV).
+Talkr is a free, open-source desktop app for turning speech into text and text into speech. Whisper, Kokoro, and Piper run on your own hardware—no account, API key, cloud upload, or monthly bill.
 
-## Quick Start
+**[Visit the website](https://talkr-three.vercel.app/) · [Download Talkr](https://talkr-three.vercel.app/download) · [Report a bug](https://github.com/alihassan-coder/Talkr/issues/new?template=bug_report.yml)**
 
-### Prerequisites
+## Why Talkr?
 
-- **Node.js 20+** (use `nvm` or `fnm`)
-- **pnpm 9+** (`corepack enable pnpm`)
-- **Rust stable** (`rustup default stable`)
-- **System dependencies:**
-  - **Linux:** `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libudev-dev`
-  - **macOS:** Xcode Command Line Tools
-  - **Windows:** Visual Studio Build Tools
+- 🔒 **Private by design** — audio, text, and history stay on your computer.
+- 🎙️ **Two-way speech tools** — transcribe recordings or create natural-sounding audio.
+- ⚡ **Hardware aware** — uses Vulkan or Metal when available and falls back to the CPU.
+- 🧠 **Bring your own models** — choose from the built-in catalog or import local models.
+- 🧰 **Useful exports** — save transcripts as TXT/SRT and generated speech as WAV.
+- 🆓 **Actually open source** — MIT licensed, with no paid tier or telemetry.
 
-### Development
+## Get Talkr
+
+Grab the latest installer for Windows, macOS, or Linux from the **[download page](https://talkr-three.vercel.app/download)**. Each release includes SHA-256 checksums so you can verify what you downloaded.
+
+Talkr works offline after you download a model. It only connects when you ask it to download a model or check for updates.
+
+## Run from source
+
+You will need [Node.js 20+](https://nodejs.org/), [pnpm 9+](https://pnpm.io/), [Rust](https://rustup.rs/), and the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-# Install dependencies
+git clone https://github.com/alihassan-coder/Talkr.git
+cd Talkr
+corepack enable
 pnpm install
-
-# Run desktop app (dev mode)
 pnpm dev:desktop
+```
 
-# Run web landing page
+To run only the website:
+
+```bash
 pnpm dev:web
-
-# Type checking
-pnpm typecheck
-
-# Linting
-pnpm lint
-
-# Build everything
-pnpm build
 ```
 
-### Tests
+## Under the hood
 
-```bash
-pnpm test                                   # all JS unit tests (desktop + web, Vitest)
-pnpm --filter web test:e2e                  # website end-to-end (Playwright)
-pnpm --filter @talkr/model-catalog validate --offline
-
-cd apps/desktop
-node scripts/build-engine.mjs --debug       # the engine sidecar (the app's build needs it)
-node scripts/fetch-test-models.mjs ../../.test-models   # optional: real-model tests
-cd src-tauri
-TALKR_TEST_MODELS=../../../.test-models cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+```text
+Tauri + React app ── JSON lines ──▶ isolated Rust engine
+     UI & history                  whisper.cpp · sherpa-onnx
 ```
 
-On Windows, put `src-tauri/target/debug` on `PATH` for the tests (sherpa-onnx DLLs); on Linux,
-`LD_LIBRARY_PATH`. CI runs all of this on Windows, macOS and Linux, plus the Vulkan engine
-against a software GPU, on every push and before every release.
+The speech engine runs as a sidecar process, so a model or GPU failure does not take down the app. Talkr can retry work on the CPU and keeps all app data in `~/.talkr` (or `%USERPROFILE%\.talkr` on Windows).
 
-### Building Installers
+This monorepo contains:
 
-```bash
-cd apps/desktop
-pnpm tauri build    # builds the engine sidecars too (scripts/build-engine.mjs)
-# Output in apps/desktop/src-tauri/target/*/release/bundle/
-```
+- `apps/desktop` — Tauri desktop app and Rust speech engine
+- `apps/web` — Next.js website
+- `packages/ui` — shared React components
+- `packages/model-catalog` — model metadata and checksums
+- `packages/config` — shared TypeScript and ESLint configuration
 
-The GPU (Vulkan) engine is built when the Vulkan SDK is installed (`VULKAN_SDK`); otherwise the
-app ships CPU-only and says so in Settings. Pushing a `v*` tag builds and drafts a release on
-GitHub, after the full test suite passes.
+## Contributing
 
-## Architecture
+Ideas, bug reports, docs, and code are all welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the community ground rules.
 
-```
-Talkr app (Tauri, React UI)  ──JSON lines over stdin/stdout──▶  talkr-engine (sidecar process)
-  commands, downloads, history,                                  whisper.cpp  (speech to text)
-  engine_host.rs (supervisor)                                    sherpa-onnx  (text to speech)
-```
-
-- `engine_host.rs` starts the engine on demand, stops it after 5 idle minutes to free memory,
-  turns a crash or out-of-memory kill into a readable message, and restarts it.
-- A job that crashes the GPU engine is retried on the CPU, and the GPU stays off until the
-  compute setting changes or Talkr updates.
-- `talkr-engine-gpu` (Vulkan) ships next to the CPU `talkr-engine` on Windows and Linux; on
-  macOS one engine drives Metal.
-
-## Project Structure
-
-```
-talkr/
-├── apps/
-│   ├── desktop/          # Tauri v2 + React app
-│   │   ├── src/          # React frontend
-│   │   └── src-tauri/    # Rust backend (app crate)
-│   │       ├── engine/   # talkr-engine: whisper.cpp + sherpa-onnx process
-│   │       └── protocol/ # messages between app and engine
-│   └── web/              # Next.js landing page
-├── packages/
-│   ├── ui/               # Shared design system (React + Tailwind)
-│   ├── model-catalog/    # Model definitions (single source of truth)
-│   └── config/           # Shared TS/ESLint config
-└── .github/workflows/    # CI/CD
-```
-
-## Data Directory
-
-All data lives in `~/.talkr/` (or `%USERPROFILE%\.talkr\` on Windows):
-
-```
-~/.talkr/
-├── config.json           # User settings
-├── models/
-│   ├── stt/              # Whisper models
-│   └── tts/              # Kokoro/Piper models
-├── audio/                # Generated speech & recordings
-├── history/
-│   └── talkr.db          # SQLite history
-├── cache/downloads/      # Resumable downloads
-└── logs/                 # App logs
-```
-
-## Model Catalog
-
-Models defined in `packages/model-catalog/catalog.json`. Validate with:
-
-```bash
-pnpm catalog:validate
-pnpm catalog:validate:fill  # Fetch real SHA256/sizes
-```
-
-### Included Models
-
-**STT (Whisper.cpp GGML):**
-- Tiny/Base/Small/Medium/Large-v3-turbo (English & Multilingual), plus compressed q5 versions for 4 GB machines
-
-**TTS (Sherpa-onnx):**
-- Kokoro Multi-language / English
-- Piper voices (English US/UK, German, French)
-
-Every download is checked against the SHA-256 in the catalog, from a pinned URL.
-
-## Tech Stack
-
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Zustand, React Router
-- **Backend:** Rust, Tauri v2, Tokio, Rusqlite, Reqwest
-- **Audio:** CPAL (recording), Symphonia (decoding), Rubato (streaming resampling), Hound (WAV)
-- **STT:** whisper-rs (whisper.cpp bindings)
-- **TTS:** sherpa-rs (Kokoro, Piper/VITS)
-- **Monorepo:** pnpm workspaces, Turborepo
+If Talkr saves you a trip to the cloud, consider leaving a ⭐. It helps more people find the project.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-Models have their own licenses (MIT, Apache-2.0, GPL-3.0 for espeak-ng-data) — displayed in-app before download.
+Talkr is available under the [MIT License](LICENSE). Downloadable models and their data keep their own licenses, which Talkr shows before download.

@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an idea for Talkr
+title: "[Idea]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: A concrete use case helps us understand the idea.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick check
+      options:
+        - label: I searched existing issues for similar ideas.
+          required: true
