@@ -94,14 +94,14 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
                   <span className="w-11 shrink-0 pt-[3px] font-mono text-[11px] tabular-nums text-subtle">
                     {formatTimestamp(s.startMs)}
                   </span>
-                  <span data-selectable className="text-[15px] leading-snug text-fg">
+                  <span data-selectable dir="auto" className="text-[15px] leading-snug text-fg">
                     {s.text.trim()}
                   </span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p data-selectable className="whitespace-pre-wrap px-6 py-5 text-[15px] leading-relaxed text-fg">
+            <p data-selectable dir="auto" className="whitespace-pre-wrap px-6 py-5 text-[15px] leading-relaxed text-fg">
               {item.text.trim()}
             </p>
           )}

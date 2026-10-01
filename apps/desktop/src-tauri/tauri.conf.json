@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Talkr",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "app.talkr",
   "build": {
     "beforeDevCommand": "node scripts/build-engine.mjs --debug && pnpm dev",
@@ -50,6 +50,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
@@ -72,11 +73,35 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libayatana-appindicator3-1",
-          "librsvg2-common"
+          "librsvg2-common",
+          "libasound2 | libasound2t64",
+          "libvulkan1",
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good"
         ]
       },
       "appimage": {
         "bundleMediaFramework": true
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "alsa-lib",
+          "vulkan-loader",
+          "gstreamer1-plugins-base",
+          "gstreamer1-plugins-good"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwMTI4Qjc4QTAxOTBCRUQKUldUdEN4bWdlSXNTWUFQUzhyWXl6UEFFVjhOOEppR21UL09DYWtRcFprOXFQRytEQ3Z6Tk9rTTUK",
+      "endpoints": [
+        "https://github.com/alihassan-coder/Talkr/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

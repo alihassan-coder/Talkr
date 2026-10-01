@@ -1,9 +1,9 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { SettingsPage } from '@/pages/SettingsPage'
-import { hardwareFixture, mockBackend, pathsFixture, reject, settingsFixture } from '@/test/tauri'
+import { hardwareFixture, installedFixture, mockBackend, pathsFixture, reject, settingsFixture } from '@/test/tauri'
 import type { EngineStatus, PartialSettings, Settings } from '@/lib/types'
 
 const GIB = 1024 ** 3
@@ -107,5 +107,121 @@ describe('Settings > Compute', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByText('Shown in the Talkr desktop app.')).toBeInTheDocument()
+  })
+})
+
+describe('Settings > loading and saving', () => {
+  const base = (extra: Record<string, unknown> = {}) => ({
+    get_settings: settingsFixture(),
+    get_engine_status: gpuStatus,
+    list_installed_models: [],
+    get_storage_usage: { modelsBytes: 0, audioBytes: 0, dbBytes: 0, totalBytes: 0 },
+    get_app_paths: pathsFixture,
+    get_hardware_info: hardwareFixture(),
+    'plugin:app|version': '9.8.7',
+    ...extra,
+  })
+
+  const render_ = () =>
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    )
+
+  it('shows the app version from Tauri', async () => {
+    mockBackend(base())
+    render_()
+    expect(await screen.findByText('v9.8.7')).toBeInTheDocument()
+  })
+
+  it('shows "dev" when the version cannot be read', async () => {
+    mockBackend(base({ 'plugin:app|version': reject('no app plugin') }))
+    render_()
+    expect(await screen.findByText('dev')).toBeInTheDocument()
+  })
+
+  it('offers a retry when the settings cannot be loaded', async () => {
+    let fail = true
+    mockBackend(base({ get_settings: () => (fail ? Promise.reject('config.json is broken') : settingsFixture()) }))
+    const user = userEvent.setup()
+    render_()
+    expect(await screen.findByText('Could not load settings')).toBeInTheDocument()
+    expect(screen.getByText('config.json is broken')).toBeInTheDocument()
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Compute')).toBeInTheDocument()
+  })
+
+  it('rolls back only the failed field, keeping a newer change', async () => {
+    let failRetention = true
+    const api = mockBackend(
+      base({
+        update_settings: (args: Record<string, unknown>) => {
+          const patch = args.settings as PartialSettings
+          if ('historyRetentionDays' in patch && failRetention) {
+            failRetention = false
+            return new Promise((_, rejectWith) => setTimeout(() => rejectWith('disk is read-only'), 30))
+          }
+          return settingsFixture({ ...patch, historyRetentionDays: 0 } as Partial<Settings>)
+        },
+      }),
+    )
+    const user = userEvent.setup()
+    render_()
+    await screen.findByText('Compute')
+    await user.click(screen.getByRole('combobox', { name: 'Keep history' }))
+    await user.click(await screen.findByRole('option', { name: '30 days' }))
+    await user.click(screen.getByRole('switch', { name: 'Keep recordings' }))
+    expect(screen.getByRole('switch', { name: 'Keep recordings' })).toHaveAttribute('aria-checked', 'false')
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Keep history' })).toHaveTextContent('Forever'))
+    // The newer, successful change survives the rollback of the failed one.
+    expect(screen.getByRole('switch', { name: 'Keep recordings' })).toHaveAttribute('aria-checked', 'false')
+    expect(api.count('update_settings')).toBe(2)
+  })
+
+  it('picks a voice of the new speech model when the default voice is not in it', async () => {
+    const api = mockBackend(
+      base({
+        get_settings: settingsFixture({ defaultTtsModel: 'kokoro', defaultVoice: 'af_heart' }),
+        list_installed_models: [
+          installedFixture({ id: 'kokoro', kind: 'tts', name: 'Kokoro' }),
+          installedFixture({ id: 'piper-amy', kind: 'tts', name: 'Piper Amy' }),
+        ],
+        list_voices: (args: Record<string, unknown>) =>
+          args.modelId === 'kokoro'
+            ? [{ id: 'af_heart', name: 'Heart', language: 'en', gender: null }]
+            : [{ id: 'amy', name: 'Amy', language: 'en', gender: null }],
+        update_settings: (args: Record<string, unknown>) => settingsFixture(args.settings as Partial<Settings>),
+      }),
+    )
+    const user = userEvent.setup()
+    render_()
+    await screen.findByText('Compute')
+    await user.click(screen.getByRole('combobox', { name: 'Speech model' }))
+    await user.click(await screen.findByRole('option', { name: 'Piper Amy' }))
+    await waitFor(() =>
+      expect(api.argsOf('update_settings')).toEqual([
+        { settings: { defaultTtsModel: 'piper-amy' } },
+        { settings: { defaultVoice: 'amy' } },
+      ]),
+    )
+  })
+
+  it('says when models, voices, disk usage or hardware cannot be read', async () => {
+    mockBackend(
+      base({
+        get_settings: settingsFixture({ defaultTtsModel: 'kokoro' }),
+        list_installed_models: reject('models folder is unreadable'),
+        list_voices: reject('kokoro failed to load'),
+        get_storage_usage: reject('access denied'),
+        get_hardware_info: reject('wmi unavailable'),
+      }),
+    )
+    render_()
+    expect(await screen.findByText('Could not load installed models')).toBeInTheDocument()
+    expect(await screen.findByText(/Could not load the voices: kokoro failed to load/)).toBeInTheDocument()
+    expect(await screen.findByText(/Could not measure disk usage: access denied/)).toBeInTheDocument()
+    expect(await screen.findByText(/Could not read the hardware: wmi unavailable/)).toBeInTheDocument()
   })
 })

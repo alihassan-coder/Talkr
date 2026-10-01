@@ -6,20 +6,40 @@
 //! engine died is retried once on the CPU, and the GPU is not used again until the next update
 //! or until the user changes the compute setting.
 //!
+//! The app also stops the engine itself: when it sits idle, when the app exits, when a model it
+//! may hold open is deleted, and when it hangs. Jobs caught by such a stop end as cancelled; they
+//! are never reported as a crash and never count against the GPU.
+//!
 //! Binaries, installed next to the app's executable:
 //! - `talkr-engine`: CPU on Windows/Linux; on macOS it also drives Metal.
 //! - `talkr-engine-gpu` (Windows/Linux, optional): the Vulkan build. It needs the Vulkan
 //!   loader to even start, which is why the CPU build exists alongside it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use talkr_protocol::{from_line, to_line, Device, DeviceKind, Event, FailureKind, Op, Request};
+use uuid::Uuid;
 use crate::error::{AppError, Result};
+
+/// How long the engine gets to answer a cancelled job before it is killed. Native code can be
+/// stuck somewhere that never checks the cancel flag.
+pub const CANCEL_GRACE: Duration = Duration::from_secs(10);
+/// How long a job may wait without hearing anything from the engine (no progress, no answer)
+/// before the engine is considered hung and restarted. Model loading and long jobs both report
+/// progress well within this.
+pub const STALL_LIMIT: Duration = Duration::from_secs(10 * 60);
+/// How long a job that needs the other engine build waits for the running one to finish its
+/// jobs before replacing it anyway.
+pub const SWITCH_WAIT: Duration = Duration::from_secs(10 * 60);
+/// How long to wait for a stopped engine to actually exit (and let go of its files).
+pub const EXIT_WAIT: Duration = Duration::from_secs(5);
+/// Cancellations of jobs that never reached the engine are forgotten after this.
+const CANCEL_MEMORY: Duration = Duration::from_secs(60 * 60);
 
 /// Which engine build to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,16 +87,18 @@ pub struct NativeLauncher {
 
 impl NativeLauncher {
     /// Find the engines next to the running executable (where the installers and `tauri dev` put
-    /// sidecars). `TALKR_ENGINE` / `TALKR_ENGINE_GPU` override the paths.
+    /// sidecars). In debug builds `TALKR_ENGINE` / `TALKR_ENGINE_GPU` override the paths; a
+    /// release build only ever runs the engines it was installed with.
     pub fn locate() -> Self {
         let dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .unwrap_or_default();
         let exe = |name: &str| dir.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX));
-        let cpu = std::env::var_os("TALKR_ENGINE").map(PathBuf::from).unwrap_or_else(|| exe("talkr-engine"));
-        let gpu = std::env::var_os("TALKR_ENGINE_GPU")
-            .map(PathBuf::from)
+        let dev_override =
+            |var: &str| if cfg!(debug_assertions) { std::env::var_os(var).map(PathBuf::from) } else { None };
+        let cpu = dev_override("TALKR_ENGINE").unwrap_or_else(|| exe("talkr-engine"));
+        let gpu = dev_override("TALKR_ENGINE_GPU")
             .or_else(|| Some(exe("talkr-engine-gpu")))
             .filter(|p| p.is_file());
         Self { cpu, gpu }
@@ -146,23 +168,68 @@ enum Msg {
     Event(Event),
     /// The engine process ended while the job was waiting.
     Died(Exit),
+    /// The app stopped the engine on purpose while the job was waiting.
+    Stopped,
 }
 
 /// Jobs waiting for the engine's answer, by request id.
 type Pending = Mutex<HashMap<String, flume::Sender<Msg>>>;
 
+/// What one engine process's threads and the jobs waiting on it share.
+struct Shared {
+    process: Mutex<Box<dyn EngineProcess>>,
+    pending: Pending,
+    alive: AtomicBool,
+    /// Set before the app kills the engine on purpose, so its jobs end as cancelled instead of
+    /// being reported as a crash (a kill looks like the OOM killer's SIGKILL on Unix).
+    stopping: AtomicBool,
+    /// When the engine last said anything, for spotting a hung engine.
+    last_event: Mutex<Instant>,
+    /// The model the engine keeps loaded: the one its last successful job used.
+    resident: Mutex<Option<String>>,
+    /// Every model a request to this engine named. It may hold any of these files open.
+    touched: Mutex<HashSet<String>>,
+}
+
+impl Shared {
+    /// Running, and not on its way out: new jobs may be sent to it.
+    fn usable(&self) -> bool {
+        self.alive.load(Ordering::Relaxed) && !self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Kill the engine on purpose.
+    fn stop(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        lock(&self.process).kill();
+    }
+
+    /// Keep track of what the engine holds loaded, from a job's final answer.
+    fn note_answer(&self, model: Option<&str>, event: &Event) {
+        let mut resident = lock(&self.resident);
+        match event {
+            Event::Transcribed { .. } | Event::Synthesized { .. } | Event::Voices { .. } => {
+                *resident = model.map(str::to_string);
+            }
+            Event::Unloaded { .. } => *resident = None,
+            // Switching models frees the old one before loading the new; if that load (or the
+            // job) failed, there is no telling what is left, so assume nothing.
+            Event::Failed { .. } if model.is_some() && resident.as_deref() != model => *resident = None,
+            _ => {}
+        }
+    }
+}
+
 struct Worker {
     variant: Variant,
     stdin: Box<dyn Write + Send>,
-    process: Arc<Mutex<Box<dyn EngineProcess>>>,
-    pending: Arc<Pending>,
-    alive: Arc<AtomicBool>,
+    shared: Arc<Shared>,
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
         // Closing stdin asks the engine to stop; the kill covers one that is stuck in native code.
-        lock(&self.process).kill();
+        // Either way it is deliberate, so jobs still waiting on it end as cancelled.
+        self.shared.stop();
     }
 }
 
@@ -175,20 +242,64 @@ pub enum GpuPolicy {
     Prefer,
 }
 
+/// Time limits, a field so tests can shorten them.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    cancel_grace: Duration,
+    stall: Duration,
+    switch_wait: Duration,
+    exit_wait: Duration,
+    /// How often a waiting job checks the limits above.
+    poll: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            cancel_grace: CANCEL_GRACE,
+            stall: STALL_LIMIT,
+            switch_wait: SWITCH_WAIT,
+            exit_wait: EXIT_WAIT,
+            poll: Duration::from_millis(250),
+        }
+    }
+}
+
 pub struct EngineHost {
     launcher: Box<dyn Launcher>,
     worker: Mutex<Option<Worker>>,
+    /// Signalled (with `worker`'s mutex) whenever a job's answer arrives or an engine ends, for
+    /// jobs waiting to switch engine builds.
+    idle: Arc<Condvar>,
     gpu_failed: AtomicBool,
     /// Written when the GPU engine dies, so the next launch doesn't try it again.
     gpu_marker: Option<PathBuf>,
     /// GPUs the engine reported, probed once (on the GPU build if there is one).
     devices: Mutex<Option<Vec<Device>>>,
+    /// Held while probing, so concurrent callers share one probe.
+    probing: Mutex<()>,
     last_used: Mutex<Instant>,
+    /// Jobs (and probes) in `run`, counted under `worker`'s lock.
     busy: AtomicU64,
+    /// Models used by jobs in `run`, one entry per job, changed under `worker`'s lock.
+    active_models: Mutex<Vec<String>>,
+    /// Jobs the user cancelled, and when.
+    cancels: Mutex<HashMap<String, Instant>>,
+    limits: Limits,
 }
 
 /// A job's final answer: the engine's own event, or a description of how it failed.
 pub type Answer = std::result::Result<Event, AppError>;
+
+/// The model a request names, if any.
+fn op_model(op: &Op) -> Option<&str> {
+    match op {
+        Op::Transcribe(job) => Some(&job.model.model_id),
+        Op::Synthesize(job) => Some(&job.model.model_id),
+        Op::Voices(model) => Some(&model.model_id),
+        Op::Probe | Op::Cancel | Op::Unload => None,
+    }
+}
 
 impl EngineHost {
     pub fn new(launcher: Box<dyn Launcher>, gpu_marker: Option<PathBuf>) -> Self {
@@ -199,11 +310,16 @@ impl EngineHost {
         Self {
             launcher,
             worker: Mutex::new(None),
+            idle: Arc::new(Condvar::new()),
             gpu_failed: AtomicBool::new(gpu_failed),
             gpu_marker,
             devices: Mutex::new(None),
+            probing: Mutex::new(()),
             last_used: Mutex::new(Instant::now()),
             busy: AtomicU64::new(0),
+            active_models: Mutex::new(Vec::new()),
+            cancels: Mutex::new(HashMap::new()),
+            limits: Limits::default(),
         }
     }
 
@@ -245,30 +361,73 @@ impl EngineHost {
         if let Some(devices) = lock(&self.devices).clone() {
             return devices;
         }
+        // One probe at a time: callers that arrive meanwhile wait for its result instead of
+        // starting their own.
+        let _probing = lock(&self.probing);
+        if let Some(devices) = lock(&self.devices).clone() {
+            return devices;
+        }
+        self.enter(None);
+        let probe = |gpu: bool| {
+            let id = format!("probe-{}", Uuid::new_v4());
+            self.run_once(&id, &|_| Op::Probe, gpu, &|_| {})
+        };
         let probe_on_gpu = self.gpu_available();
-        let mut answer = self.run_once("probe", &|_| Op::Probe, probe_on_gpu, &|_| {});
+        let mut answer = probe(probe_on_gpu);
         if probe_on_gpu && matches!(answer, Err(AppError::EngineDied(_))) {
             // The GPU engine can't start or crashed on start-up (no Vulkan loader, bad driver):
             // remember that, and still report what the CPU engine can do.
             self.mark_gpu_failed();
-            answer = self.run_once("probe", &|_| Op::Probe, false, &|_| {});
+            answer = probe(false);
         }
+        self.leave(None);
         let devices = match answer {
             Ok(Event::Devices { devices, .. }) => devices,
+            // The engine was stopped under the probe (app exit, a hang elsewhere): ask again next time.
+            Err(AppError::Cancelled) => return Vec::new(),
             _ => Vec::new(),
         };
         *lock(&self.devices) = Some(devices.clone());
         devices
     }
 
+    /// The model the running engine keeps loaded (the last one a job used successfully), or
+    /// `None` when no engine is running.
+    pub fn resident_model(&self) -> Option<String> {
+        let slot = lock(&self.worker);
+        slot.as_ref().filter(|w| w.shared.usable()).and_then(|w| lock(&w.shared.resident).clone())
+    }
+
     /// Run a request, reporting progress. `make_op(gpu)` builds the request for a GPU or CPU run,
     /// so a GPU job can be retried on the CPU after the GPU engine died.
     pub fn run(&self, id: &str, make_op: &dyn Fn(bool) -> Op, gpu: bool, progress: &dyn Fn(f32)) -> Answer {
-        self.busy.fetch_add(1, Ordering::Relaxed);
+        let model = op_model(&make_op(gpu)).map(str::to_string);
+        self.enter(model.as_deref());
         let answer = self.run_with_fallback(id, make_op, gpu, progress);
-        self.busy.fetch_sub(1, Ordering::Relaxed);
-        *lock(&self.last_used) = Instant::now();
+        lock(&self.cancels).remove(id);
+        self.leave(model.as_deref());
         answer
+    }
+
+    /// Count a job in. Under the worker lock, so `stop_if_idle` and `with_model_released` (which
+    /// hold it while they decide) see a job either as running or as not yet started.
+    fn enter(&self, model: Option<&str>) {
+        let _slot = lock(&self.worker);
+        self.busy.fetch_add(1, Ordering::SeqCst);
+        if let Some(model) = model {
+            lock(&self.active_models).push(model.to_string());
+        }
+    }
+
+    fn leave(&self, model: Option<&str>) {
+        *lock(&self.last_used) = Instant::now();
+        if let Some(model) = model {
+            let mut active = lock(&self.active_models);
+            if let Some(i) = active.iter().position(|m| m == model) {
+                active.swap_remove(i);
+            }
+        }
+        self.busy.fetch_sub(1, Ordering::SeqCst);
     }
 
     fn run_with_fallback(&self, id: &str, make_op: &dyn Fn(bool) -> Op, gpu: bool, progress: &dyn Fn(f32)) -> Answer {
@@ -285,64 +444,168 @@ impl EngineHost {
 
     fn run_once(&self, id: &str, make_op: &dyn Fn(bool) -> Op, gpu: bool, progress: &dyn Fn(f32)) -> Answer {
         let variant = if gpu && self.launcher.has_gpu_build() { Variant::Gpu } else { Variant::Cpu };
-        let rx = {
+        let op = make_op(gpu);
+        let model = op_model(&op).map(str::to_string);
+        let (rx, shared) = {
             let mut slot = lock(&self.worker);
-            let reusable = slot.as_ref().is_some_and(|w| {
-                w.alive.load(Ordering::Relaxed) && (w.variant == variant || (variant == Variant::Cpu && !gpu))
-            });
-            if !reusable {
+            let switch_deadline = Instant::now() + self.limits.switch_wait;
+            loop {
+                // Cancelled before it reached the engine (`cancel` holds this lock too, so a
+                // cancellation lands either here or after the request was sent).
+                if lock(&self.cancels).contains_key(id) {
+                    return Err(AppError::Cancelled);
+                }
+                let reusable = slot.as_ref().is_some_and(|w| {
+                    w.shared.usable() && (w.variant == variant || (variant == Variant::Cpu && !gpu))
+                });
+                if reusable {
+                    break;
+                }
+                // Replacing an engine kills its jobs: let the other build finish what it is doing.
+                let busy = slot
+                    .as_ref()
+                    .is_some_and(|w| w.shared.usable() && !lock(&w.shared.pending).is_empty());
+                if busy && Instant::now() < switch_deadline {
+                    slot = self.idle.wait_timeout(slot, self.limits.poll).unwrap_or_else(|e| e.into_inner()).0;
+                    continue;
+                }
+                if busy {
+                    log::warn!("the {:?} engine is still busy; replacing it anyway", slot.as_ref().map(|w| w.variant));
+                }
                 // Drop (and kill) the old engine before starting another, so two models are
                 // never resident at once.
                 *slot = None;
                 *slot = Some(self.spawn(variant)?);
+                break;
             }
             let worker = slot.as_mut().expect("just ensured");
             let (tx, rx) = flume::unbounded();
-            lock(&worker.pending).insert(id.to_string(), tx);
-            let request = Request { id: id.to_string(), op: make_op(gpu) };
+            if lock(&worker.shared.pending).insert(id.to_string(), tx).is_some() {
+                // Two jobs under one id would steal each other's answers.
+                log::error!("engine request id {} was already waiting for an answer", id);
+                debug_assert!(false, "duplicate engine request id {id}");
+            }
+            if let Some(model) = &model {
+                lock(&worker.shared.touched).insert(model.clone());
+            }
+            let request = Request { id: id.to_string(), op };
             if worker.stdin.write_all(to_line(&request).as_bytes()).and_then(|_| worker.stdin.flush()).is_err() {
                 // The engine is gone; the reader thread reports how it ended.
                 log::warn!("engine stdin closed while sending {}", id);
             }
-            rx
+            (rx, worker.shared.clone())
         };
 
+        let waiting_since = Instant::now();
         loop {
-            match rx.recv() {
+            match rx.recv_timeout(self.limits.poll) {
                 Ok(Msg::Event(Event::Progress { progress: p, .. })) => progress(p),
-                Ok(Msg::Event(event)) => return Ok(event),
+                Ok(Msg::Event(event)) => {
+                    shared.note_answer(model.as_deref(), &event);
+                    return Ok(event);
+                }
                 Ok(Msg::Died(exit)) => return Err(AppError::EngineDied(exit)),
-                Err(_) => return Err(AppError::EngineDied(Exit::Unknown)),
+                Ok(Msg::Stopped) => return Err(AppError::Cancelled),
+                Err(flume::RecvTimeoutError::Disconnected) => {
+                    return Err(AppError::Engine("The speech engine lost track of this job. Please try again.".into()))
+                }
+                Err(flume::RecvTimeoutError::Timeout) => {
+                    let cancelled_at = lock(&self.cancels).get(id).copied();
+                    if cancelled_at.is_some_and(|at| at.elapsed() >= self.limits.cancel_grace) {
+                        log::warn!("the engine did not stop job {} when asked; restarting it", id);
+                        self.abandon(&shared, id);
+                        return Err(AppError::Cancelled);
+                    }
+                    // Quiet since this job was sent, and since anything else the engine said.
+                    let heard = (*lock(&shared.last_event)).max(waiting_since);
+                    if heard.elapsed() >= self.limits.stall {
+                        log::error!("the engine stopped responding during job {}; restarting it", id);
+                        self.abandon(&shared, id);
+                        return Err(AppError::Engine(
+                            "The speech engine stopped responding and has been restarted. Please try again. \
+                             If it keeps happening, try a smaller model."
+                                .into(),
+                        ));
+                    }
+                }
             }
         }
     }
 
-    /// Ask the engine to stop job `id`. It answers the job with a `Cancelled` failure.
+    /// Give up on job `id` and kill its engine on purpose; its other jobs end as cancelled.
+    fn abandon(&self, shared: &Shared, id: &str) {
+        lock(&shared.pending).remove(id);
+        shared.stop();
+        self.idle.notify_all();
+    }
+
+    /// Ask the engine to stop job `id`. It answers the job with a `Cancelled` failure; if it has
+    /// not within `CANCEL_GRACE`, the engine is killed. A job that has not reached the engine yet
+    /// is never sent.
     pub fn cancel(&self, id: &str) {
         let mut slot = lock(&self.worker);
+        {
+            let mut cancels = lock(&self.cancels);
+            cancels.retain(|_, at| at.elapsed() < CANCEL_MEMORY);
+            cancels.insert(id.to_string(), Instant::now());
+        }
         if let Some(worker) = slot.as_mut() {
-            let line = to_line(&Request { id: id.to_string(), op: Op::Cancel });
-            let _ = worker.stdin.write_all(line.as_bytes()).and_then(|_| worker.stdin.flush());
+            if lock(&worker.shared.pending).contains_key(id) {
+                let line = to_line(&Request { id: id.to_string(), op: Op::Cancel });
+                let _ = worker.stdin.write_all(line.as_bytes()).and_then(|_| worker.stdin.flush());
+            }
         }
     }
 
     /// Stop the engine process, freeing all model memory. The next job starts a new one.
     pub fn shutdown(&self) {
-        *lock(&self.worker) = None;
+        let worker = lock(&self.worker).take();
+        drop(worker);
     }
 
     /// Stop the engine if nothing has used it for `idle`. Returns whether it was stopped.
     pub fn stop_if_idle(&self, idle: Duration) -> bool {
-        if self.busy.load(Ordering::Relaxed) > 0 || lock(&self.last_used).elapsed() < idle {
+        // Decided under the worker lock: a job counts itself in under it too (`enter`).
+        let mut slot = lock(&self.worker);
+        if self.busy.load(Ordering::SeqCst) > 0 || lock(&self.last_used).elapsed() < idle {
             return false;
         }
-        let mut slot = lock(&self.worker);
         if slot.is_some() {
             log::info!("stopping the idle engine to free memory");
             *slot = None;
             return true;
         }
         false
+    }
+
+    /// Run `remove` (deleting `model_id`'s files) once no engine can be holding them open.
+    /// Refuses while a job uses the model. Otherwise, if the running engine has used the model, it
+    /// is stopped and given up to `EXIT_WAIT` to exit, since Windows cannot delete open files.
+    /// No job reaches the engine while `remove` runs (so `remove` must not call back into the host).
+    pub fn with_model_released<T>(&self, model_id: &str, remove: impl FnOnce() -> Result<T>) -> Result<T> {
+        let mut slot = lock(&self.worker);
+        if lock(&self.active_models).iter().any(|m| m == model_id) {
+            return Err(AppError::Validation(
+                "This model is being used by a job that is still running. Wait for it to finish or cancel it, \
+                 then delete the model."
+                    .into(),
+            ));
+        }
+        let holds_model = slot.as_ref().is_some_and(|w| lock(&w.shared.touched).contains(model_id));
+        if holds_model {
+            let worker = slot.take().expect("checked above");
+            let shared = worker.shared.clone();
+            drop(worker);
+            let deadline = Instant::now() + self.limits.exit_wait;
+            while shared.alive.load(Ordering::Relaxed) {
+                if Instant::now() >= deadline {
+                    log::warn!("the engine has not exited yet; deleting {} anyway", model_id);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        remove()
     }
 
     fn mark_gpu_failed(&self) {
@@ -379,9 +642,15 @@ impl EngineHost {
             }
         })?;
         log::info!("started the {:?} engine", variant);
-        let pending: Arc<Pending> = Arc::default();
-        let alive = Arc::new(AtomicBool::new(true));
-        let process = Arc::new(Mutex::new(launched.process));
+        let shared = Arc::new(Shared {
+            process: Mutex::new(launched.process),
+            pending: Mutex::default(),
+            alive: AtomicBool::new(true),
+            stopping: AtomicBool::new(false),
+            last_event: Mutex::new(Instant::now()),
+            resident: Mutex::new(None),
+            touched: Mutex::default(),
+        });
 
         if let Some(stderr) = launched.stderr {
             std::thread::Builder::new()
@@ -400,72 +669,93 @@ impl EngineHost {
         // pipe never closes. The watcher checks the process itself instead.
         let (reader_done_tx, reader_done) = flume::bounded::<()>(0);
         {
-            let pending = pending.clone();
+            let shared = shared.clone();
+            let idle = self.idle.clone();
             let stdout = launched.stdout;
             std::thread::Builder::new()
                 .name("talkr-engine-reader".into())
                 .spawn(move || {
-                    read_events(stdout, &pending);
+                    read_events(stdout, &shared, &idle);
                     drop(reader_done_tx);
                 })
                 .map_err(AppError::Io)?;
         }
         {
-            let pending = pending.clone();
-            let alive = alive.clone();
-            let process = process.clone();
+            let shared = shared.clone();
+            let idle = self.idle.clone();
             std::thread::Builder::new()
                 .name("talkr-engine-watch".into())
-                .spawn(move || watch_process(&process, &pending, &alive, &reader_done))
+                .spawn(move || watch_process(&shared, &idle, &reader_done))
                 .map_err(AppError::Io)?;
         }
 
-        Ok(Worker { variant, stdin: launched.stdin, process, pending, alive })
+        Ok(Worker { variant, stdin: launched.stdin, shared })
     }
 }
 
-fn read_events(stdout: Box<dyn Read + Send>, pending: &Pending) {
-    for line in BufReader::new(stdout).lines() {
-        let Ok(line) = line else { break };
+fn read_events(stdout: Box<dyn Read + Send>, shared: &Shared, idle: &Condvar) {
+    let mut reader = BufReader::new(stdout);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+        // Decoded leniently: one garbled line (a native library printing to stdout) must not
+        // stop the events behind it.
+        let line = String::from_utf8_lossy(&buf);
+        if line.trim().is_empty() {
+            continue;
+        }
         let event: Event = match from_line(&line) {
             Ok(e) => e,
             Err(e) => {
-                log::warn!("engine sent something unreadable ({}): {}", e, line);
+                // Not the line itself: it may hold a transcript or the text being spoken.
+                log::warn!("engine sent something unreadable ({}, {} bytes)", e, buf.len());
                 continue;
             }
         };
+        *lock(&shared.last_event) = Instant::now();
         let Some(id) = event.id().map(str::to_string) else { continue };
-        let mut pending = lock(pending);
-        let tx = if event.is_final() { pending.remove(&id) } else { pending.get(&id).cloned() };
+        let is_final = event.is_final();
+        let tx = {
+            let mut pending = lock(&shared.pending);
+            if is_final { pending.remove(&id) } else { pending.get(&id).cloned() }
+        };
         if let Some(tx) = tx {
             let _ = tx.send(Msg::Event(event));
+        }
+        if is_final {
+            idle.notify_all();
         }
     }
 }
 
 /// Wait for the engine process to end, then fail whatever was still waiting on it.
-fn watch_process(
-    process: &Mutex<Box<dyn EngineProcess>>,
-    pending: &Pending,
-    alive: &AtomicBool,
-    reader_done: &flume::Receiver<()>,
-) {
-    let exit = loop {
+fn watch_process(shared: &Shared, idle: &Condvar, reader_done: &flume::Receiver<()>) {
+    let (exit, stopped) = loop {
         // Polled rather than a blocking wait, so `kill` can take the lock at any time.
-        if let Some(exit) = lock(process).try_wait() {
-            break exit;
+        if let Some(exit) = lock(&shared.process).try_wait() {
+            // Read now: a crashed engine that is replaced afterwards is still a crash.
+            break (exit, shared.stopping.load(Ordering::SeqCst));
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    alive.store(false, Ordering::Relaxed);
+    shared.alive.store(false, Ordering::Relaxed);
     // Let the reader hand over anything the engine wrote just before it exited.
     let _ = reader_done.recv_timeout(Duration::from_secs(1));
-    if exit != Exit::Code(0) {
+    if stopped {
+        log::info!("engine process stopped");
+    } else if exit != Exit::Code(0) {
         log::error!("engine process ended: {}", describe(exit));
     }
-    for (_, tx) in lock(pending).drain() {
-        let _ = tx.send(Msg::Died(exit));
+    for (_, tx) in lock(&shared.pending).drain() {
+        let _ = tx.send(if stopped { Msg::Stopped } else { Msg::Died(exit) });
     }
+    idle.notify_all();
 }
 
 fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -520,6 +810,7 @@ pub fn failure_to_error(kind: FailureKind, error: String) -> AppError {
 mod tests {
     use super::*;
     use std::io::{PipeReader, PipeWriter};
+    use std::collections::HashSet;
     use std::sync::atomic::AtomicUsize;
     use talkr_protocol::{ModelRef, Transcript, TranscribeJob};
 
@@ -535,6 +826,10 @@ mod tests {
         /// Die on a transcription, but leave the event pipe open, as when another process
         /// inherited the engine's stdout (seen on Windows with WebView2).
         DieKeepingPipeOpen,
+        /// Never answer a transcription, and ignore requests to cancel it (stuck in native code).
+        Hang,
+        /// Write a line that is not UTF-8 before each answer.
+        Garbage,
     }
 
     struct FakeProcess {
@@ -605,7 +900,11 @@ mod tests {
                             std::mem::forget(ev_w); // someone else still holds the pipe
                             return;
                         }
+                        (Op::Transcribe(_), Script::Hang) => continue,
                         (Op::Transcribe(job), _) => {
+                            if let Script::Garbage = script {
+                                let _ = ev_w.write_all(b"\xff\xfe not text \xc3\n");
+                            }
                             let _ = ev_w.write_all(to_line(&Event::Progress { id: id.clone(), progress: 0.5 }).as_bytes());
                             Event::Transcribed {
                                 id,
@@ -654,6 +953,36 @@ mod tests {
             language: None,
             translate: false,
         })
+    }
+
+    fn transcribe_with(model_id: &'static str) -> impl Fn(bool) -> Op {
+        move |gpu| match transcribe(gpu) {
+            Op::Transcribe(mut job) => {
+                job.model.model_id = model_id.into();
+                Op::Transcribe(job)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Short limits, so tests about hung engines finish quickly.
+    fn quick_limits() -> Limits {
+        Limits {
+            cancel_grace: Duration::from_millis(300),
+            stall: Duration::from_secs(60),
+            switch_wait: Duration::from_secs(60),
+            exit_wait: Duration::from_secs(5),
+            poll: Duration::from_millis(20),
+        }
+    }
+
+    /// Wait until the fake engine has received `n` requests.
+    fn wait_for_requests(requests: &Log<Request>, n: usize) {
+        let started = Instant::now();
+        while lock(requests).len() < n {
+            assert!(started.elapsed() < Duration::from_secs(10), "the engine never got the request");
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     type Log<T> = Arc<Mutex<Vec<T>>>;
@@ -764,6 +1093,152 @@ mod tests {
         assert!(host.stop_if_idle(Duration::ZERO));
         host.run("j2", &transcribe, false, &|_| {}).unwrap();
         assert_eq!(lock(&launches).len(), 2, "a new engine after the idle stop");
+    }
+
+    #[test]
+    fn concurrent_probes_share_one_probe_and_keep_the_gpu() {
+        let (host, _, requests) = make_host(FakeLauncher::new(Script::Healthy, Some(Script::Healthy)));
+        let host = Arc::new(host);
+        let callers: Vec<_> = (0..8)
+            .map(|_| {
+                let host = host.clone();
+                std::thread::spawn(move || host.devices())
+            })
+            .collect();
+        for caller in callers {
+            assert_eq!(caller.join().unwrap().len(), 1, "every caller gets the probe's answer");
+        }
+        assert!(!host.gpu_failed());
+        assert_eq!(lock(&requests).iter().filter(|r| r.op == Op::Probe).count(), 1);
+        // Probes never share an id.
+        host.reset_gpu();
+        host.devices();
+        let ids: HashSet<String> = lock(&requests).iter().map(|r| r.id.clone()).collect();
+        assert_eq!(ids.len(), 2, "{ids:?}");
+    }
+
+    #[test]
+    fn stopping_the_engine_during_a_job_cancels_it_without_blaming_the_gpu() {
+        let (host, launches, requests) = make_host(FakeLauncher::new(Script::Healthy, Some(Script::Hang)));
+        let host = Arc::new(host);
+        let job = {
+            let host = host.clone();
+            std::thread::spawn(move || host.run("j1", &transcribe, true, &|_| {}))
+        };
+        wait_for_requests(&requests, 1);
+        host.shutdown();
+        let answer = job.join().unwrap();
+        assert!(matches!(answer, Err(AppError::Cancelled)), "{answer:?}");
+        assert!(!host.gpu_failed() && host.gpu_available());
+        assert_eq!(*lock(&launches), vec![Variant::Gpu], "not retried on the CPU");
+    }
+
+    #[test]
+    fn an_engine_that_ignores_a_cancel_is_killed() {
+        let (mut host, launches, requests) = make_host(FakeLauncher::new(Script::Hang, None));
+        host.limits = quick_limits();
+        let host = Arc::new(host);
+        let job = {
+            let host = host.clone();
+            std::thread::spawn(move || host.run("j1", &transcribe, false, &|_| {}))
+        };
+        wait_for_requests(&requests, 1);
+        let started = Instant::now();
+        host.cancel("j1");
+        let answer = job.join().unwrap();
+        assert!(matches!(answer, Err(AppError::Cancelled)), "{answer:?}");
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        assert!(lock(&requests).iter().any(|r| r.id == "j1" && r.op == Op::Cancel), "asked politely first");
+        // The hung engine is gone; the next job gets a fresh one.
+        assert!(matches!(host.run("j2", &|_| Op::Unload, false, &|_| {}), Ok(Event::Unloaded { .. })));
+        assert_eq!(lock(&launches).len(), 2);
+    }
+
+    #[test]
+    fn a_silent_engine_is_restarted() {
+        let (mut host, launches, _) = make_host(FakeLauncher::new(Script::Hang, None));
+        host.limits = Limits { stall: Duration::from_millis(300), ..quick_limits() };
+        let err = host.run("j1", &transcribe, false, &|_| {}).unwrap_err().to_string();
+        assert!(err.contains("stopped responding"), "{err}");
+        host.run("j2", &|_| Op::Unload, false, &|_| {}).unwrap();
+        assert_eq!(lock(&launches).len(), 2);
+    }
+
+    #[test]
+    fn a_job_cancelled_before_it_is_sent_never_reaches_the_engine() {
+        let (host, launches, requests) = make_host(FakeLauncher::new(Script::Healthy, None));
+        host.cancel("j1");
+        let answer = host.run("j1", &transcribe, false, &|_| {});
+        assert!(matches!(answer, Err(AppError::Cancelled)), "{answer:?}");
+        assert!(lock(&requests).is_empty() && lock(&launches).is_empty());
+        host.run("j2", &transcribe, false, &|_| {}).unwrap();
+    }
+
+    #[test]
+    fn unreadable_lines_are_skipped() {
+        let (host, _, _) = make_host(FakeLauncher::new(Script::Garbage, None));
+        let answer = host.run("j1", &transcribe, false, &|_| {});
+        assert!(matches!(answer, Ok(Event::Transcribed { .. })), "{answer:?}");
+        host.run("j2", &transcribe, false, &|_| {}).unwrap();
+    }
+
+    #[test]
+    fn tracks_the_resident_model() {
+        let (host, _, _) = make_host(FakeLauncher::new(Script::Healthy, None));
+        assert_eq!(host.resident_model(), None);
+        host.run("j1", &transcribe_with("first"), false, &|_| {}).unwrap();
+        assert_eq!(host.resident_model().as_deref(), Some("first"));
+        host.run("j2", &transcribe_with("second"), false, &|_| {}).unwrap();
+        assert_eq!(host.resident_model().as_deref(), Some("second"));
+        host.run("j3", &|_| Op::Unload, false, &|_| {}).unwrap();
+        assert_eq!(host.resident_model(), None);
+        host.run("j4", &transcribe_with("first"), false, &|_| {}).unwrap();
+        host.shutdown();
+        assert_eq!(host.resident_model(), None);
+    }
+
+    #[test]
+    fn a_model_in_use_cannot_be_released() {
+        let (mut host, launches, requests) = make_host(FakeLauncher::new(Script::Hang, None));
+        host.limits = quick_limits();
+        let host = Arc::new(host);
+        let job = {
+            let host = host.clone();
+            std::thread::spawn(move || host.run("j1", &transcribe_with("busy"), false, &|_| {}))
+        };
+        wait_for_requests(&requests, 1);
+        let refused = host.with_model_released("busy", || Ok(()));
+        assert!(matches!(refused, Err(AppError::Validation(_))), "{refused:?}");
+        // Another model is not in this engine: it is left alone, job and all.
+        let mut removed = false;
+        host.with_model_released("other", || {
+            removed = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(removed && !job.is_finished());
+        host.cancel("j1");
+        assert!(matches!(job.join().unwrap(), Err(AppError::Cancelled)));
+        host.with_model_released("busy", || Ok(())).unwrap();
+        assert_eq!(lock(&launches).len(), 1);
+    }
+
+    #[test]
+    fn releasing_a_loaded_model_stops_the_engine_first() {
+        let (host, launches, _) = make_host(FakeLauncher::new(Script::Healthy, None));
+        host.run("j1", &transcribe_with("m"), false, &|_| {}).unwrap();
+        let worker_alive = {
+            let slot = lock(&host.worker);
+            slot.as_ref().unwrap().shared.clone()
+        };
+        host.with_model_released("m", || {
+            assert!(!worker_alive.alive.load(Ordering::Relaxed), "the engine exited before the files go");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(host.resident_model(), None);
+        host.run("j2", &transcribe_with("n"), false, &|_| {}).unwrap();
+        assert_eq!(lock(&launches).len(), 2);
     }
 
     #[test]

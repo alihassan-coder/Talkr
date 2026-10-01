@@ -33,6 +33,20 @@ pub const SPEECH_RATE_RANGE: std::ops::RangeInclusive<f32> = 0.25..=4.0;
 pub const MAX_CPU_THREADS: usize = 256;
 /// Upper bound for `historyRetentionDays` (0 = keep forever): 100 years.
 pub const MAX_RETENTION_DAYS: u32 = 36_500;
+/// Longest model id, voice id or language code a setting may hold, in bytes. Real ones are a
+/// few dozen at most; the cap keeps a bad value from bloating the file or reaching the engine.
+pub const MAX_SETTING_TEXT_BYTES: usize = 128;
+
+/// Why a free-text setting (model, voice or language) cannot be used, if it cannot.
+fn text_setting_problem(value: &str) -> Option<String> {
+    if value.len() > MAX_SETTING_TEXT_BYTES {
+        Some(format!("is too long (at most {} bytes)", MAX_SETTING_TEXT_BYTES))
+    } else if value.chars().any(char::is_control) {
+        Some("must not contain control characters".into())
+    } else {
+        None
+    }
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -132,6 +146,19 @@ impl Settings {
         if self.stt_language.trim().is_empty() {
             notices.push("Settings: sttLanguage is empty; using auto".to_string());
             self.stt_language = defaults.stt_language;
+        } else if let Some(problem) = text_setting_problem(&self.stt_language) {
+            notices.push(format!("Settings: sttLanguage {}; using auto", problem));
+            self.stt_language = defaults.stt_language;
+        }
+        for (name, value) in [
+            ("defaultTtsModel", &mut self.default_tts_model),
+            ("defaultVoice", &mut self.default_voice),
+            ("defaultSttModel", &mut self.default_stt_model),
+        ] {
+            if let Some(problem) = value.as_deref().and_then(text_setting_problem) {
+                notices.push(format!("Settings: {} {}; clearing it", name, problem));
+                *value = None;
+            }
         }
     }
 
@@ -204,6 +231,16 @@ impl PartialSettings {
         if let Some(language) = &self.stt_language {
             if language.trim().is_empty() {
                 return Err(AppError::Validation("sttLanguage must not be empty".into()));
+            }
+        }
+        for (name, value) in [
+            ("sttLanguage", &self.stt_language),
+            ("defaultTtsModel", &self.default_tts_model),
+            ("defaultVoice", &self.default_voice),
+            ("defaultSttModel", &self.default_stt_model),
+        ] {
+            if let Some(problem) = value.as_deref().and_then(text_setting_problem) {
+                return Err(AppError::Validation(format!("{} {}", name, problem)));
             }
         }
         Ok(())
@@ -479,5 +516,51 @@ mod tests {
         ] {
             assert!(matches!(bad.validate(), Err(AppError::Validation(_))), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn validate_bounds_text_settings() {
+        let at_limit = "x".repeat(MAX_SETTING_TEXT_BYTES);
+        let too_long = "x".repeat(MAX_SETTING_TEXT_BYTES + 1);
+        let ok = PartialSettings {
+            default_tts_model: Some(at_limit),
+            default_voice: Some("af_heart".into()),
+            default_stt_model: Some("whisper-small".into()),
+            stt_language: Some("pt-BR".into()),
+            ..Default::default()
+        };
+        assert!(ok.validate().is_ok());
+        for value in [too_long.as_str(), "af\nheart", "a\u{7}b", "tab\there", "x\u{0}"] {
+            for bad in [
+                PartialSettings { default_tts_model: Some(value.into()), ..Default::default() },
+                PartialSettings { default_voice: Some(value.into()), ..Default::default() },
+                PartialSettings { default_stt_model: Some(value.into()), ..Default::default() },
+                PartialSettings { stt_language: Some(value.into()), ..Default::default() },
+            ] {
+                assert!(matches!(bad.validate(), Err(AppError::Validation(_))), "{bad:?}");
+            }
+        }
+        // The limit is in bytes: 43 three-byte characters are over it.
+        let wide = PartialSettings { default_voice: Some("€".repeat(43)), ..Default::default() };
+        assert!(wide.validate().is_err());
+    }
+
+    #[test]
+    fn bad_text_settings_in_the_file_are_reset() {
+        let (_dir, paths) = temp_paths();
+        let long = "m".repeat(MAX_SETTING_TEXT_BYTES + 1);
+        let json = serde_json::json!({
+            "sttLanguage": "e\u{1}n",
+            "defaultTtsModel": long,
+            "defaultVoice": "af_heart",
+            "defaultSttModel": "a\nb",
+        });
+        fs::write(&paths.config_file, json.to_string()).unwrap();
+        let (s, notices) = Settings::load_with_notices(&paths).unwrap();
+        assert_eq!(notices.len(), 3, "{notices:?}");
+        assert_eq!(s.stt_language, "auto");
+        assert_eq!(s.default_tts_model, None);
+        assert_eq!(s.default_stt_model, None);
+        assert_eq!(s.default_voice.as_deref(), Some("af_heart"));
     }
 }

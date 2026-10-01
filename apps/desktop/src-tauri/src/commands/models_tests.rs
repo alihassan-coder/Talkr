@@ -170,10 +170,33 @@ fn imports_stt_folder_with_ggml_bin() {
     let env = Env::new();
     env.write("whisper-folder/ggml-model.bin", &ggml(b"weights"));
     env.write("whisper-folder/README.md", b"readme");
+    env.write("whisper-folder/samples/big.wav", &[0u8; 4096]);
     let model = import_model(&env.paths, &env.src("whisper-folder"), ModelKind::Stt).unwrap();
+    assert_eq!(model.id, "whisper-folder");
     let dir = env.paths.model_dir("stt", &model.id);
-    assert!(dir.join("ggml-model.bin").is_file());
-    assert!(dir.join("README.md").is_file());
+    assert_eq!(std::fs::read(dir.join("ggml-model.bin")).unwrap(), ggml(b"weights"));
+    // whisper.cpp needs only the .bin: nothing else in the folder is copied.
+    assert!(!dir.join("README.md").exists() && !dir.join("samples").exists());
+    let manifest = ModelManifest::read(&dir).unwrap();
+    assert_eq!(manifest.files, vec!["ggml-model.bin".to_string()]);
+    assert_eq!(manifest.size_bytes, ggml(b"weights").len() as u64);
+    env.assert_no_scratch();
+}
+
+#[test]
+fn removing_a_model_dir_deletes_the_manifest_and_the_rest() {
+    let env = Env::new();
+    let src = env.piper("to-delete");
+    let model = import_model(&env.paths, &src, ModelKind::Tts).unwrap();
+    let dir = env.paths.model_dir("tts", &model.id);
+    remove_model_dir(&dir).unwrap();
+    assert!(!dir.exists());
+    assert!(locate_model(&env.paths, "to-delete").is_none());
+    // Already gone, or left without a manifest by an earlier attempt: still fine.
+    remove_model_dir(&dir).unwrap();
+    std::fs::create_dir_all(dir.join("espeak-ng-data")).unwrap();
+    remove_model_dir(&dir).unwrap();
+    assert!(!dir.exists());
 }
 
 #[test]

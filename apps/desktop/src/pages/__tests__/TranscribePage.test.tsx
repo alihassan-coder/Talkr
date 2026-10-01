@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { TranscribePage } from '@/pages/TranscribePage'
-import { emitEvent, historyFixture, installedFixture, mockBackend, reject, settingsFixture } from '@/test/tauri'
+import { useJobs } from '@/stores/jobs'
+import { emitEvent, flush, historyFixture, installedFixture, mockBackend, reject, settingsFixture } from '@/test/tauri'
 
 const handlers = (extra: Record<string, unknown> = {}) => ({
   list_installed_models: [
@@ -108,4 +109,72 @@ describe('TranscribePage', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/Transcribing/)).not.toBeInTheDocument()
   })
+
+  it('sends a Cancel pressed before the job id arrives once it does', async () => {
+    let resolveJob!: (id: string) => void
+    const backend = mockBackend(handlers({ transcribe_file: () => new Promise<string>((r) => (resolveJob = r)) }))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('tab', { name: 'File' }))
+    await user.click(screen.getByRole('button', { name: 'Choose file' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
+    expect(backend.count('cancel_job')).toBe(0)
+    await act(async () => resolveJob('job-1'))
+    await flush()
+    expect(backend.argsOf('cancel_job')).toEqual([{ jobId: 'job-1' }])
+  })
+
+  it('shows the running job and then its result after leaving and coming back', async () => {
+    mockBackend(handlers())
+    await startFileJob()
+    cleanup()
+    await emitEvent('job://progress', { jobId: 'job-1', progress: 0.25 })
+    renderPage()
+    expect(await screen.findByText('interview.mp3')).toBeInTheDocument()
+    expect(screen.getByText('Transcribing · 25%')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    cleanup()
+    await emitEvent('stt://done', {
+      jobId: 'job-1',
+      historyItem: historyFixture({ id: 'job-1', text: 'مرحبا بالعالم' }),
+    })
+    renderPage()
+    const text = await screen.findByText('مرحبا بالعالم')
+    expect(text).toHaveAttribute('dir', 'auto')
+    expect(screen.getByText('interview.mp3')).toBeInTheDocument()
+  })
+
+  it('does not start a transcription while speech is being generated', async () => {
+    const backend = mockBackend(handlers())
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('tab', { name: 'File' }))
+    await act(() => useJobs.getState().start('tts', () => Promise.resolve('job-tts')))
+    expect(screen.getByRole('button', { name: 'Choose file' })).toBeDisabled()
+    expect(screen.getByText('Wait for speech generation to finish.')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Record' }))
+    expect(screen.getByRole('button', { name: 'Start recording' })).toBeDisabled()
+    expect(backend.count('transcribe_file')).toBe(0)
+  })
+
+  it('links to the speech-to-text models when none is installed', async () => {
+    mockBackend(handlers({ list_installed_models: [] }))
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/transcribe']}>
+        <Routes>
+          <Route path="/transcribe" element={<TranscribePage />} />
+          <Route path="/models" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await user.click(await screen.findByRole('button', { name: 'Browse models' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/models?kind=stt')
+  })
 })
+
+function LocationProbe() {
+  const location = useLocation()
+  return <p data-testid="location">{location.pathname + location.search}</p>
+}

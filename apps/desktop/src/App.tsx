@@ -8,6 +8,7 @@ import { TranscribePage } from '@/pages/TranscribePage'
 import { ModelsPage } from '@/pages/ModelsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { UpdateNotice } from '@/features/updates/UpdateNotice'
 import { useApplyAppearance } from '@/lib/appearance'
 import { useUi } from '@/stores/ui'
 
@@ -74,6 +75,7 @@ export function App() {
           </Routes>
         </div>
       </main>
+      <UpdateNotice />
       <Toaster />
     </div>
   )

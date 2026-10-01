@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: 'Download',
   description:
     'Download Talkr for Windows, macOS or Linux. Free, open-source, offline text-to-speech and speech-to-text. SHA-256 checksums on every release.',
+  alternates: { canonical: '/download' },
 }
 
 const checks = [

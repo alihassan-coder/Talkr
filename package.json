@@ -8,6 +8,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "catalog:validate": "pnpm --filter=model-catalog run validate",
+    "check:versions": "node scripts/check-versions.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\"",
     "build:desktop": "pnpm --filter desktop app:build",
     "test": "turbo run test",

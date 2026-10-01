@@ -2,18 +2,16 @@
 
 import { Download } from 'lucide-react'
 import { useSyncExternalStore } from 'react'
-import { detectDownload, downloadUrl } from '@/lib/releases'
-
-const subscribe = () => () => {}
+import { detectDownload, subscribeDownload } from '@/lib/releases'
 
 /**
  * Primary call to action. Renders a neutral label on the server, then swaps in
  * the visitor's platform after hydration.
  */
 export function DownloadButton({ size = 'lg' }: { size?: 'md' | 'lg' }) {
-  const detected = useSyncExternalStore(subscribe, detectDownload, () => null)
+  const detected = useSyncExternalStore(subscribeDownload, detectDownload, () => null)
 
-  const href = detected ? downloadUrl(detected.file.name) : '/download'
+  const href = detected ? detected.href : '/download'
   const label = detected ? `Download for ${detected.label}` : 'Download Talkr'
   const sizing = size === 'lg' ? 'h-12 px-6 text-[15px]' : 'h-10 px-4 text-sm'
 

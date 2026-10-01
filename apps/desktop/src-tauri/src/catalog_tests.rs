@@ -148,3 +148,31 @@ fn model_kind_round_trips() {
     assert_eq!(ModelKind::parse("STT"), None);
     assert_eq!(ModelKind::parse(""), None);
 }
+
+#[test]
+fn torn_manifest_is_not_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = crate::downloader::tests::test_paths(dir.path());
+    let catalog = Catalog::load_embedded().unwrap();
+    let model = &catalog.models[0];
+    let model_dir = model.dir(&paths);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    assert!(!model.is_installed(&paths), "no manifest");
+
+    // What a crash halfway through writing the manifest can leave behind.
+    std::fs::write(model_dir.join("manifest.json"), "{\"id\":\"whisp").unwrap();
+    assert!(!model.is_installed(&paths), "a manifest that does not parse is not an install");
+    std::fs::write(model_dir.join("manifest.json"), "").unwrap();
+    assert!(!model.is_installed(&paths));
+
+    let manifest = ModelManifest {
+        id: model.id.clone(),
+        version: "1.0".into(),
+        sha256: "a".repeat(64),
+        installed_at: 1,
+        size_bytes: 1,
+        files: vec!["m.bin".into()],
+    };
+    std::fs::write(model_dir.join("manifest.json"), serde_json::to_string(&manifest).unwrap()).unwrap();
+    assert!(model.is_installed(&paths));
+}

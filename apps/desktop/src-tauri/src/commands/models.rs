@@ -163,25 +163,39 @@ pub async fn cancel_download(state: State<'_, AppState>, job_id: String) -> Resu
 }
 
 #[command]
-pub async fn delete_model(state: State<'_, AppState>, model_id: String) -> Result<()> {
+pub async fn delete_model(app: AppHandle, model_id: String) -> Result<()> {
     validate_model_id(&model_id)?;
-    state.downloads.cancel(&model_id);
+    // Stopping the engine waits for its process to exit: keep that off the async runtime.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.downloads.cancel(&model_id);
 
-    let (_, model_dir) = locate_model(&state.paths, &model_id)
-        .ok_or_else(|| AppError::NotFound(format!("Model not found: {}", model_id)))?;
+        let (_, model_dir) = locate_model(&state.paths, &model_id)
+            .ok_or_else(|| AppError::NotFound(format!("Model not found: {}", model_id)))?;
 
-    // Stop the engine first so it lets go of the model: Windows cannot delete open files.
-    state.engine.shutdown();
+        // Refused while a job uses the model; otherwise an engine that may hold its files open is
+        // stopped first, since Windows cannot delete open files.
+        state.engine.with_model_released(&model_id, || remove_model_dir(&model_dir))
+    })
+    .await?
+}
 
+/// Delete an installed model's folder. The manifest goes first: if the rest fails part-way, what
+/// is left is not mistaken for an installed model, and the next install replaces it.
+pub(crate) fn remove_model_dir(model_dir: &Path) -> Result<()> {
+    match std::fs::remove_file(model_dir.join("manifest.json")) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
     if model_dir.exists() {
         std::fs::remove_dir_all(model_dir)?;
     }
-
     Ok(())
 }
 
 /// Import a model from a local file or folder (`kind` is "stt" or "tts").
-/// STT: a whisper.cpp GGML `.bin` file (or a folder containing one).
+/// STT: a whisper.cpp GGML `.bin` file (or a folder containing one; only that file is copied).
 /// TTS: a sherpa-onnx model folder: Kokoro (`model.onnx`, `voices.bin`, `tokens.txt`,
 /// `espeak-ng-data/`) or Piper/VITS (`<name>.onnx`, `tokens.txt`, `espeak-ng-data/`).
 #[command]
@@ -210,8 +224,9 @@ pub(crate) fn import_model(paths: &AppPaths, src: &Path, kind: ModelKind) -> Res
         return Err(AppError::Validation(format!("A model named \"{}\" is already installed", model_id)));
     }
 
-    validate_import_source(&src, kind)?;
-    let size = source_size(&src)?;
+    // What to copy: a speech-to-text model is its one .bin file, even when a folder was chosen.
+    let copy_from = validate_import_source(&src, kind)?;
+    let size = source_size(&copy_from)?;
     ensure_free_space(&paths.home, size.saturating_add(DISK_MARGIN), &model_id)?;
 
     let dest_dir = paths.model_dir(kind.as_str(), &model_id);
@@ -226,7 +241,7 @@ pub(crate) fn import_model(paths: &AppPaths, src: &Path, kind: ModelKind) -> Res
     if scratch.exists() {
         std::fs::remove_dir_all(&scratch)?;
     }
-    let result = copy_model(&src, &scratch, &model_id).and_then(|manifest| {
+    let result = copy_model(&copy_from, &scratch, &model_id).and_then(|manifest| {
         if let Some(parent) = dest_dir.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -295,8 +310,10 @@ fn files_with_extension(dir: &Path, ext: &str) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Check that `src` looks like a model the engine can load, before copying anything.
-fn validate_import_source(src: &Path, kind: ModelKind) -> Result<()> {
+/// Check that `src` looks like a model the engine can load, before copying anything. Returns what
+/// to copy: the GGML file for speech to text (whisper.cpp needs nothing else), the folder for
+/// text to speech.
+fn validate_import_source(src: &Path, kind: ModelKind) -> Result<PathBuf> {
     match kind {
         ModelKind::Stt => {
             let bin = if is_real_file(src) {
@@ -311,7 +328,8 @@ fn validate_import_source(src: &Path, kind: ModelKind) -> Result<()> {
                     AppError::Validation("The folder has no whisper.cpp .bin model file".into())
                 })?
             };
-            check_ggml_magic(&bin)
+            check_ggml_magic(&bin)?;
+            Ok(bin)
         }
         ModelKind::Tts => {
             if !is_real_dir(src) {
@@ -342,7 +360,7 @@ fn validate_import_source(src: &Path, kind: ModelKind) -> Result<()> {
                     missing.join(", ")
                 )));
             }
-            Ok(())
+            Ok(src.to_path_buf())
         }
     }
 }
@@ -426,7 +444,9 @@ fn copy_model(src: &Path, dest_dir: &Path, model_id: &str) -> Result<ModelManife
         size_bytes,
         files,
     };
-    std::fs::write(dest_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
+    // Same as downloads: files on disk first, then the manifest atomically, so a crash never
+    // leaves a manifest that marks a half-copied model as installed.
+    crate::downloader::write_manifest(dest_dir, &manifest)?;
     Ok(manifest)
 }
 

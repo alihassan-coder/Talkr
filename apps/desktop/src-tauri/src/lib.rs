@@ -160,6 +160,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -186,10 +188,11 @@ pub fn run() {
             get_hardware_info,
             get_engine_status,
             get_app_paths,
-            read_audio_file,
+            read_history_audio,
             get_settings,
             update_settings,
             open_data_folder,
+            stop_engine,
             list_catalog,
             list_installed_models,
             download_model,

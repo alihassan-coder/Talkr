@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, FolderOpen, Trash2 } from 'lucide-react'
+import { getVersion } from '@tauri-apps/api/app'
+import { ArrowUpRight, FolderOpen, RotateCw, Trash2, TriangleAlert } from 'lucide-react'
 import {
   getAppPaths,
   getHardwareInfo,
@@ -22,16 +23,17 @@ import type {
   StorageUsage,
   Voice,
 } from '@/lib/types'
-import { Button, PageHeader } from '@/components/ui'
+import { Button, EmptyState, PageHeader } from '@/components/ui'
+import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import { cx } from '@/lib/cx'
+import { errorText } from '@/lib/errors'
 import { toast, toastError } from '@/stores/toast'
 import { Row, Section, Switch } from '@/features/settings/controls'
 import { AppearanceSection } from '@/features/settings/Appearance'
 import { ComputeSection } from '@/features/settings/Compute'
 import { formatBytes } from '@/features/history/utils'
 
-const VERSION = '0.1.4'
 const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 
 // Mirrors `Settings::default()` in config.rs; used as the browser preview.
@@ -46,6 +48,18 @@ const defaultSettings: Settings = {
   speechRate: 1,
   historyRetentionDays: 0,
   saveRecordings: true,
+}
+
+/**
+ * Undo a failed save field by field: a field goes back to its previous value only while it
+ * still holds the value that failed, so a newer change made meanwhile is kept.
+ */
+function rollbackFields(current: Settings, patch: PartialSettings, previous: Settings): Settings {
+  const next: Settings = { ...current }
+  for (const key of Object.keys(patch) as (keyof PartialSettings)[]) {
+    if (current[key] === patch[key]) (next as unknown as Record<string, unknown>)[key] = previous[key]
+  }
+  return next
 }
 
 const languages: [string, string][] = [
@@ -86,40 +100,89 @@ const backendNames: Record<HardwareInfo['recommendedBackend'], string> = {
 export function SettingsPage() {
   const tauri = isTauri()
   const [settings, setSettings] = useState<Settings | null>(tauri ? null : defaultSettings)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [settingsAttempt, setSettingsAttempt] = useState(0)
   const [models, setModels] = useState<InstalledModel[]>([])
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [modelsAttempt, setModelsAttempt] = useState(0)
   const [voices, setVoices] = useState<Voice[]>([])
+  const [voicesError, setVoicesError] = useState<string | null>(null)
   const [usage, setUsage] = useState<StorageUsage | null>(null)
+  const [usageError, setUsageError] = useState<string | null>(null)
   const [paths, setPaths] = useState<AppPaths | null>(null)
   const [hardware, setHardware] = useState<HardwareInfo | null>(null)
+  const [hardwareError, setHardwareError] = useState<string | null>(null)
+  const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [cleaning, setCleaning] = useState(false)
   const [cleanedCount, setCleanedCount] = useState<number | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const rateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Only the newest save may replace the page's settings with what the backend returned.
+  const saveSeq = useRef(0)
 
   const refreshUsage = () => {
     if (!tauri) return
     getStorageUsage()
-      .then(setUsage)
-      .catch(() => setUsage(null))
+      .then((u) => {
+        setUsage(u)
+        setUsageError(null)
+      })
+      .catch((e: unknown) => {
+        setUsage(null)
+        setUsageError(errorText(e))
+      })
   }
 
   useEffect(() => {
     if (!isTauri()) return
-    getSettings().then(setSettings).catch(toastError)
+    let alive = true
+    getSettings()
+      .then((s) => {
+        if (alive) setSettings(s)
+      })
+      .catch((e: unknown) => {
+        if (alive) setSettingsError(errorText(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [settingsAttempt])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let alive = true
     listInstalledModels()
-      .then(setModels)
-      .catch(() => setModels([]))
+      .then((m) => {
+        if (!alive) return
+        setModels(m)
+        setModelsError(null)
+      })
+      .catch((e: unknown) => {
+        if (!alive) return
+        setModels([])
+        setModelsError(errorText(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [modelsAttempt])
+
+  useEffect(() => {
+    if (!isTauri()) return
     getStorageUsage()
       .then(setUsage)
-      .catch(() => setUsage(null))
+      .catch((e: unknown) => setUsageError(errorText(e)))
     getAppPaths()
       .then(setPaths)
       .catch(() => setPaths(null))
     getHardwareInfo()
       .then(setHardware)
-      .catch(() => setHardware(null))
+      .catch((e: unknown) => setHardwareError(errorText(e)))
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(''))
   }, [])
 
   // Voices come from the chosen TTS model (loading it may take a moment).
@@ -129,10 +192,14 @@ export function SettingsPage() {
     let cancelled = false
     listVoices({ modelId: ttsModel })
       .then((v) => {
-        if (!cancelled) setVoices(v)
+        if (cancelled) return
+        setVoices(v)
+        setVoicesError(null)
       })
-      .catch(() => {
-        if (!cancelled) setVoices([])
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setVoices([])
+        setVoicesError(errorText(e))
       })
     return () => {
       cancelled = true
@@ -151,32 +218,53 @@ export function SettingsPage() {
     return () => clearTimeout(t)
   }, [confirmClear])
 
-  const persist = async (patch: PartialSettings, rollback: Settings) => {
-    if (!tauri) return
+  /** Resolves to true once saved. On failure, rolls back only the fields that still hold the failed value. */
+  const persist = async (patch: PartialSettings, previous: Settings): Promise<boolean> => {
+    if (!tauri) return true
+    const seq = ++saveSeq.current
     setStatus('saving')
     try {
-      setSettings(await updateSettings({ settings: patch }))
-      setStatus('saved')
+      const saved = await updateSettings({ settings: patch })
+      if (seq === saveSeq.current) {
+        setSettings(saved)
+        setStatus('saved')
+      }
+      return true
     } catch (e) {
-      setSettings(rollback)
-      setStatus('idle')
+      setSettings((current) => (current ? rollbackFields(current, patch, previous) : current))
+      if (seq === saveSeq.current) setStatus('idle')
       toastError(e)
+      return false
     }
   }
 
   /** Optimistic: the page updates at once and rolls back if saving fails. Resolves once saved. */
   const save = (patch: PartialSettings) => {
-    if (!settings) return Promise.resolve()
-    setSettings({ ...settings, ...patch })
+    if (!settings) return Promise.resolve(false)
+    setSettings((current) => (current ? { ...current, ...patch } : current))
     return persist(patch, settings)
   }
 
   const saveRate = (speechRate: number) => {
     if (!settings) return
-    const rollback = settings
-    setSettings({ ...settings, speechRate })
+    const previous = settings
+    setSettings((current) => (current ? { ...current, speechRate } : current))
     if (rateTimer.current) clearTimeout(rateTimer.current)
-    rateTimer.current = setTimeout(() => void persist({ speechRate }, rollback), 350)
+    rateTimer.current = setTimeout(() => void persist({ speechRate }, previous), 350)
+  }
+
+  /** A new speech model: keep the default voice only if the new model has it. */
+  const changeTtsModel = async (defaultTtsModel: string) => {
+    const voice = settings?.defaultVoice ?? null
+    if (!(await save({ defaultTtsModel })) || !voice || !tauri) return
+    let list: Voice[]
+    try {
+      list = await listVoices({ modelId: defaultTtsModel })
+    } catch {
+      return // The Voice row shows the error.
+    }
+    const first = list[0]
+    if (first && !list.some((v) => v.id === voice)) await save({ defaultVoice: first.id })
   }
 
   const cleanUp = async () => {
@@ -223,11 +311,30 @@ export function SettingsPage() {
     return (
       <div className="space-y-8">
         <PageHeader title="Settings" />
+        {settingsError ? (
+          <EmptyState
+            icon={<TriangleAlert className="size-4" strokeWidth={1.75} />}
+            title="Could not load settings"
+            description={settingsError}
+            action={
+              <Button
+                icon={<RotateCw className="size-3.5" strokeWidth={2} />}
+                onClick={() => {
+                  setSettingsError(null)
+                  setSettingsAttempt((n) => n + 1)
+                }}
+              >
+                Retry
+              </Button>
+            }
+          />
+        ) : (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-28 animate-pulse rounded-2xl border border-line bg-surface" />
           ))}
         </div>
+        )}
       </div>
     )
   }
@@ -264,6 +371,21 @@ export function SettingsPage() {
       <AppearanceSection />
 
       <Section title="Defaults">
+        {modelsError ? (
+          <div className="border-b border-line px-5 py-4">
+            <Notice
+              tone="error"
+              title="Could not load installed models"
+              action={
+                <Button size="sm" onClick={() => setModelsAttempt((n) => n + 1)}>
+                  Retry
+                </Button>
+              }
+            >
+              {modelsError}
+            </Notice>
+          </div>
+        ) : null}
         <Row label="Transcription model" description="Used by Transcribe unless you pick another.">
           <ModelSelect
             label="Transcription model"
@@ -289,11 +411,20 @@ export function SettingsPage() {
             label="Speech model"
             value={settings.defaultTtsModel}
             models={ttsModels}
-            onChange={(defaultTtsModel) => void save({ defaultTtsModel })}
+            onChange={(defaultTtsModel) => void changeTtsModel(defaultTtsModel)}
           />
         </Row>
         {settings.defaultTtsModel ? (
-          <Row label="Voice" description="Default voice for the speech model.">
+          <Row
+            label="Voice"
+            description={
+              voicesError ? (
+                <span role="alert">Could not load the voices: {voicesError}</span>
+              ) : (
+                'Default voice for the speech model.'
+              )
+            }
+          >
             <Select
               label=""
               aria-label="Default voice"
@@ -390,9 +521,16 @@ export function SettingsPage() {
         <div className="space-y-4 border-b border-line px-5 py-5">
           <div className="flex items-baseline justify-between gap-4">
             <p className="text-[13.5px] font-medium">Disk usage</p>
-            <p className="font-mono text-[12px] tabular-nums text-muted">{usage ? formatBytes(usage.totalBytes) : '—'}</p>
+            <p className="font-mono text-[12px] tabular-nums text-muted">
+              {usage ? formatBytes(usage.totalBytes) : usageError ? 'Unknown' : '—'}
+            </p>
           </div>
           <StorageBar usage={usage} />
+          {usageError && !usage ? (
+            <p role="alert" className="text-[12.5px] text-muted">
+              Could not measure disk usage: {usageError}
+            </p>
+          ) : null}
         </div>
         <Row
           label="Data folder"
@@ -429,7 +567,7 @@ export function SettingsPage() {
 
       <Section title="About">
         <Row label="Talkr" description="Free and open source under MIT.">
-          <span className="font-mono text-[12px] text-subtle">v{VERSION}</span>
+          <span className="font-mono text-[12px] text-subtle">{version ? `v${version}` : 'dev'}</span>
         </Row>
         {hardware ? (
           <Row
@@ -448,6 +586,13 @@ export function SettingsPage() {
             <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">
               {backendNames[hardware.recommendedBackend]}
             </span>
+          </Row>
+        ) : hardwareError ? (
+          <Row
+            label="This computer"
+            description={<span className="text-[12.5px] text-muted">Could not read the hardware: {hardwareError}</span>}
+          >
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-subtle">Unknown</span>
           </Row>
         ) : null}
         <Row label="Source code" description="Report issues, read the code, or contribute.">

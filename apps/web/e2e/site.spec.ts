@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import catalog from '../../../packages/model-catalog/catalog.json' with { type: 'json' }
-import { VERSION, platforms } from '../lib/releases'
+import { MAC_CHOOSER, VERSION, platforms } from '../lib/releases'
 
 const RELEASE_PREFIX = `https://github.com/alihassan-coder/Talkr/releases/download/v${VERSION}/`
 
@@ -59,7 +59,6 @@ test.describe('download links', () => {
 
   for (const [ua, file] of [
     ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36', `Talkr_${VERSION}_x64-setup.exe`],
-    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Chrome/130 Safari/537.36', `Talkr_${VERSION}_aarch64.dmg`],
     ['Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36', `Talkr_${VERSION}_amd64.AppImage`],
   ] as const) {
     test(`the main download button picks ${file}`, async ({ browser }) => {
@@ -67,6 +66,43 @@ test.describe('download links', () => {
       const page = await context.newPage()
       await page.goto('/')
       const button = page.getByRole('link', { name: /^Download for / }).first()
+      await expect(button).toHaveAttribute('href', `${RELEASE_PREFIX}${file}`)
+      await context.close()
+    })
+  }
+
+  // Every Mac browser says "Intel Mac OS X": without a real answer the button opens the chooser.
+  const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Chrome/130 Safari/537.36'
+
+  test('the main download button sends a Mac of unknown architecture to the Mac downloads', async ({ browser }) => {
+    const context = await browser.newContext({ userAgent: MAC_UA })
+    // Like Safari: no client hints, and a GPU name that doesn't give the chip away.
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'userAgentData', { configurable: true, value: undefined })
+      HTMLCanvasElement.prototype.getContext = () => null
+    })
+    const page = await context.newPage()
+    await page.goto('/')
+    const button = page.getByRole('link', { name: /^Download for macOS/ }).first()
+    await expect(button).toHaveAttribute('href', MAC_CHOOSER)
+    await context.close()
+  })
+
+  for (const [architecture, file] of [
+    ['arm', `Talkr_${VERSION}_aarch64.dmg`],
+    ['x86', `Talkr_${VERSION}_x64.dmg`],
+  ] as const) {
+    test(`the main download button picks ${file} when the browser reports ${architecture}`, async ({ browser }) => {
+      const context = await browser.newContext({ userAgent: MAC_UA })
+      await context.addInitScript((arch) => {
+        Object.defineProperty(navigator, 'userAgentData', {
+          configurable: true,
+          value: { platform: 'macOS', getHighEntropyValues: () => Promise.resolve({ architecture: arch }) },
+        })
+      }, architecture)
+      const page = await context.newPage()
+      await page.goto('/')
+      const button = page.getByRole('link', { name: /^Download for macOS/ }).first()
       await expect(button).toHaveAttribute('href', `${RELEASE_PREFIX}${file}`)
       await context.close()
     })

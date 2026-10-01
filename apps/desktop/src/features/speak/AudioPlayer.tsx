@@ -10,6 +10,7 @@ import { formatDuration } from './utils'
 
 /** Card with a custom player: a waveform that fills in as the audio plays. */
 export function AudioPlayer({
+  id,
   path,
   seed,
   title,
@@ -19,6 +20,8 @@ export function AudioPlayer({
   fallbackDurationMs = 0,
   autoPlay = false,
 }: {
+  /** History item id; the backend reads its audio. */
+  id: string
   path: string
   seed: number
   title: string
@@ -28,8 +31,10 @@ export function AudioPlayer({
   fallbackDurationMs?: number
   autoPlay?: boolean
 }) {
-  const { url, error } = useAudioUrl(path)
+  const { url, error } = useAudioUrl(id, path)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const [decodeFailed, setDecodeFailed] = useState(false)
+  const unavailable = decodeFailed || !!error
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(fallbackDurationMs / 1000)
@@ -50,7 +55,7 @@ export function AudioPlayer({
   const ratio = duration > 0 ? Math.min(1, time / duration) : 0
 
   useEffect(() => {
-    if (error) toastError(error)
+    if (error) console.error('Could not load the audio file', error)
   }, [error])
 
   const toggle = () => {
@@ -93,44 +98,50 @@ export function AudioPlayer({
         <div className="flex items-center gap-2">{actions}</div>
       </div>
 
-      <div
-        tabIndex={0}
-        role="group"
-        aria-label="Audio player. Space to play or pause, arrows to seek."
-        onKeyDown={onKeyDown}
-        className="flex items-center gap-5 rounded-b-2xl px-6 pb-5 pt-6"
-      >
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={!url}
-          aria-label={playing ? 'Pause' : 'Play'}
-          className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint hover:scale-[1.04] active:scale-95"
+      {unavailable ? (
+        <p role="status" className="px-6 pb-5 pt-6 text-[13px] text-muted">
+          Audio not available. The file may have been moved or deleted.
+        </p>
+      ) : (
+        <div
+          tabIndex={0}
+          role="group"
+          aria-label="Audio player. Space to play or pause, arrows to seek."
+          onKeyDown={onKeyDown}
+          className="flex items-center gap-5 rounded-b-2xl px-6 pb-5 pt-6"
         >
-          {playing ? (
-            <Pause className="size-4" fill="currentColor" strokeWidth={0} />
-          ) : (
-            <Play className="size-4 translate-x-px" fill="currentColor" strokeWidth={0} />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={!url}
+            aria-label={playing ? 'Pause' : 'Play'}
+            className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition-transform duration-200 ease-out-quint hover:scale-[1.04] active:scale-95"
+          >
+            {playing ? (
+              <Pause className="size-4" fill="currentColor" strokeWidth={0} />
+            ) : (
+              <Play className="size-4 translate-x-px" fill="currentColor" strokeWidth={0} />
+            )}
+          </button>
 
-        <div className="min-w-0 flex-1">
-          <div className="relative h-16 cursor-pointer" onClick={onWaveClick}>
-            <Waveform bars={bars} className="absolute inset-0 size-full text-line-strong" />
-            {/* clip-path keeps both layers aligned bar for bar */}
-            <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - ratio * 100}% 0 0)` }}>
-              <Waveform bars={bars} className="size-full text-accent" />
+          <div className="min-w-0 flex-1">
+            <div className="relative h-16 cursor-pointer" onClick={onWaveClick}>
+              <Waveform bars={bars} className="absolute inset-0 size-full text-line-strong" />
+              {/* clip-path keeps both layers aligned bar for bar */}
+              <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - ratio * 100}% 0 0)` }}>
+                <Waveform bars={bars} className="size-full text-accent" />
+              </div>
+              {time > 0 ? (
+                <span className="pointer-events-none absolute -inset-y-1.5 w-px bg-accent" style={{ left: `${ratio * 100}%` }} />
+              ) : null}
             </div>
-            {time > 0 ? (
-              <span className="pointer-events-none absolute -inset-y-1.5 w-px bg-accent" style={{ left: `${ratio * 100}%` }} />
-            ) : null}
-          </div>
-          <div className="mt-2 flex justify-between font-mono text-[10.5px] tabular-nums text-subtle">
-            <span>{formatDuration(time * 1000)}</span>
-            <span>{formatDuration(duration * 1000)}</span>
+            <div className="mt-2 flex justify-between font-mono text-[10.5px] tabular-nums text-subtle">
+              <span>{formatDuration(time * 1000)}</span>
+              <span>{formatDuration(duration * 1000)}</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="border-t border-line px-6 py-3 font-mono text-[11px] text-subtle">{footer}</div>
 
@@ -152,7 +163,7 @@ export function AudioPlayer({
         onError={(event) => {
           const mediaError = event.currentTarget.error
           console.error('Could not decode the audio file', { code: mediaError?.code, message: mediaError?.message })
-          toastError('Could not decode the audio file')
+          setDecodeFailed(true)
         }}
       />
     </Card>

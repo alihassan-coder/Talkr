@@ -181,4 +181,48 @@ describe('ModelsPage', () => {
     expect(await screen.findByText('Could not load models')).toBeInTheDocument()
     expect(screen.getByText('catalog.json is missing')).toBeInTheDocument()
   })
+
+  it('opens the list asked for in the link', async () => {
+    mockBackend(handlers())
+    render(
+      <MemoryRouter initialEntries={['/models?kind=tts']}>
+        <ModelsPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Kokoro')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Text to speech' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('names download progress for screen readers', async () => {
+    mockBackend(handlers())
+    const user = userEvent.setup()
+    await renderPage()
+    await user.click(within(row(/^Whisper Base$/)).getByRole('button', { name: /Download/ }))
+    await emitEvent('download://progress', progress({ receivedBytes: 30, totalBytes: 100 }))
+    const bar = screen.getByRole('progressbar', { name: 'Downloading Whisper Base (English)' })
+    expect(bar).toHaveAttribute('aria-valuetext', '30%')
+  })
+
+  it('moves through the import menu with the keyboard', async () => {
+    mockBackend(handlers())
+    const user = userEvent.setup()
+    await renderPage()
+    const trigger = screen.getByRole('button', { name: 'Import model' })
+    await user.click(trigger)
+    const items = within(screen.getByRole('menu', { name: 'Import model' })).getAllByRole('menuitem')
+    expect(items[0]).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(items[1]).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(items[0]).toHaveFocus()
+    await user.keyboard('{ArrowUp}')
+    expect(items[1]).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(items[0]).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(items[1]).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
 })

@@ -43,9 +43,29 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The full engine tests need native libraries and test models; CI runs them on Windows, macOS, and Linux.
 
+### Building installers locally
+
+Release builds create signed updater artifacts (`bundle.createUpdaterArtifacts`), which needs the project's private signing key. Without it, `pnpm build:desktop` stops with a signing error; turn the updater artifacts off for a local build instead:
+
+```bash
+pnpm --filter desktop tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+The Tauri plugins exist twice, as Rust crates (`apps/desktop/src-tauri/Cargo.toml`) and npm packages (`apps/desktop/package.json`). Keep each pair on the same major.minor version and update them together.
+
+## Releasing
+
+Maintainers only. The order matters, because installed copies and the website both follow the release:
+
+1. Bump the version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`, the three `Cargo.toml` files under `apps/desktop/src-tauri` and `apps/web/lib/releases.ts` (update the download sizes there after the build). `node scripts/check-versions.mjs` must pass; CI runs it too.
+2. Merge to `master`, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must equal `v` + the version, or the release workflow stops.
+3. The workflow runs CI, then builds, signs (`TAURI_SIGNING_PRIVATE_KEY` secret) and uploads every installer, its updater signature, `latest.json` and `SHA256SUMS-*.txt` to a **draft** release.
+4. Test the draft's installers, then **Publish** it. Publishing makes `releases/latest/download/latest.json` point at it, which is when installed copies offer the update.
+5. Deploy the website last. Its links point at `releases/download/vX.Y.Z/…`, which 404 while the release is still a draft.
+
 ## Pull requests
 
-1. Create a focused branch from `main`.
+1. Create a focused branch from `master`.
 2. Keep the change small and explain the _why_, not just the _what_.
 3. Add or update tests when behavior changes.
 4. Run the relevant checks and mention anything you could not run.

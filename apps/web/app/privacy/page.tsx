@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: 'Privacy policy',
   description:
     'Talkr runs on your computer and keeps your data there. No servers, no account, no telemetry. Here is what it stores, where, and how to remove it.',
+  alternates: { canonical: '/privacy' },
 }
 
 const toc = [
@@ -250,10 +251,6 @@ export default function PrivacyPage() {
                   Questions about this policy? Open an issue on{' '}
                   <a href={ISSUES_URL} target="_blank" rel="noopener noreferrer" className={link}>
                     GitHub
-                  </a>{' '}
-                  or email{' '}
-                  <a href="mailto:privacy@talkr.app" className={link}>
-                    privacy@talkr.app
                   </a>
                   .
                 </p>

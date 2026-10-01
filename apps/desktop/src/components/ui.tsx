@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { cx } from '@/lib/cx'
 
@@ -22,6 +22,7 @@ export function Button({
   disabled,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: 'sm' | 'md' | 'lg'
   loading?: boolean
@@ -152,13 +153,17 @@ export function Segmented<T extends string>({
   )
 }
 
-export function Progress({ value, className }: { value: number | null; className?: string }) {
+/** Thin progress bar; `value` is 0..1, or null while unknown. `label` names it for screen readers. */
+export function Progress({ value, label, className }: { value: number | null; label: string; className?: string }) {
+  const percent = value === null ? null : Math.round(Math.min(1, Math.max(0, value)) * 100)
   return (
     <div
       role="progressbar"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={value === null ? undefined : Math.round(value * 100)}
+      aria-valuenow={percent ?? undefined}
+      aria-valuetext={percent === null ? 'In progress' : `${percent}%`}
       className={cx('relative h-[3px] overflow-hidden rounded-full bg-fg/10', className)}
     >
       {value === null ? (

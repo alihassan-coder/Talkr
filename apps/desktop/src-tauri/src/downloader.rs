@@ -70,6 +70,12 @@ const MAX_EXPANSION_RATIO: u64 = 10;
 const MAX_EXTRACTED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// Upper bound on archive entries, so an archive cannot exhaust inodes with empty files.
 const MAX_ARCHIVE_ENTRIES: u64 = 100_000;
+/// Largest download accepted when neither the catalog nor the server says how big the file is.
+/// Same ceiling as extraction: nothing bigger could be installed anyway.
+const MAX_DOWNLOAD_BYTES: u64 = MAX_EXTRACTED_BYTES;
+/// Slack on top of the catalog size, in case the file is re-uploaded slightly bigger: the
+/// larger of 1% and 1 MB. The checksum still has the final say.
+const SIZE_SLACK_MIN: u64 = 1024 * 1024;
 
 /// Whether a catalog entry without a valid checksum may still be installed. Debug builds only,
 /// so catalog work-in-progress can be tried out; release builds refuse unverifiable files.
@@ -174,7 +180,7 @@ impl DownloadJob {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
         if received > 0 {
-            let too_long = file_size > 0 && received > file_size;
+            let too_long = received > max_download_bytes(self.size_bytes, file_size);
             let changed = matches!((&saved_validator, &remote.validator), (Some(saved), Some(now)) if saved != now);
             if too_long || changed {
                 // Stale/corrupt partial file, or the file changed upstream: start over.
@@ -240,6 +246,15 @@ impl DownloadJob {
 
                 total = total.max(received + response.content_length().unwrap_or(0));
 
+                // The checksum only runs once the stream ends, so without a cap a broken or
+                // hostile server could fill the disk first. This response's own length is the
+                // freshest word on the file's size; HEAD's is the fallback.
+                let server_size = match response.content_length() {
+                    Some(len) => received.saturating_add(len),
+                    None => file_size,
+                };
+                let limit = max_download_bytes(self.size_bytes, server_size);
+
                 let mut last_emit = Instant::now();
                 let mut last_bytes = received;
 
@@ -249,6 +264,16 @@ impl DownloadJob {
                         _ = self.wait_cancel() => return Err(AppError::Cancelled),
                     };
                     let Some(chunk) = chunk else { break };
+                    if received.saturating_add(chunk.len() as u64) > limit {
+                        // Close the file first: Windows cannot delete an open one.
+                        drop(file);
+                        self.remove_partial().await;
+                        return Err(AppError::Download(format!(
+                            "The server sent more data than expected for {} (over {}); the download was stopped and discarded",
+                            self.name,
+                            format_bytes(limit)
+                        )));
+                    }
                     file.write_all(&chunk).await?;
                     received += chunk.len() as u64;
 
@@ -325,18 +350,20 @@ impl DownloadJob {
         self.check_cancel()?;
 
         let dir = model_dir.to_path_buf();
-        let (files, size_bytes) = tokio::task::spawn_blocking(move || list_dir_files(&dir)).await??;
-
-        let manifest = ModelManifest {
-            id: self.model_id.clone(),
-            version: "1.0".into(),
-            sha256: hash,
-            installed_at: chrono::Utc::now().timestamp_millis(),
-            size_bytes,
-            files,
-        };
-
-        tokio::fs::write(model_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?).await?;
+        let model_id = self.model_id.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let (files, size_bytes) = list_dir_files(&dir)?;
+            let manifest = ModelManifest {
+                id: model_id,
+                version: "1.0".into(),
+                sha256: hash,
+                installed_at: chrono::Utc::now().timestamp_millis(),
+                size_bytes,
+                files,
+            };
+            write_manifest(&dir, &manifest)
+        })
+        .await??;
 
         Ok(total)
     }
@@ -386,6 +413,21 @@ impl DownloadJob {
             state,
             error,
         });
+    }
+}
+
+/// The most bytes a download may receive. `catalog_size` (plus a little slack) and
+/// `server_size` are each 0 when unknown; the smaller known bound wins, and with neither known
+/// the hard ceiling applies.
+fn max_download_bytes(catalog_size: u64, server_size: u64) -> u64 {
+    let from_catalog = (catalog_size > 0)
+        .then(|| catalog_size.saturating_add((catalog_size / 100).max(SIZE_SLACK_MIN)));
+    let from_server = (server_size > 0).then_some(server_size);
+    match (from_catalog, from_server) {
+        (Some(c), Some(s)) => c.min(s),
+        (Some(c), None) => c,
+        (None, Some(s)) => s,
+        (None, None) => MAX_DOWNLOAD_BYTES,
     }
 }
 
@@ -673,6 +715,51 @@ fn unpack_checked<R: std::io::Read>(mut archive: tar::Archive<R>, dest: &Path, l
         }
     }
     Ok(())
+}
+
+/// Write `manifest.json` into `dir`, the step that marks a model as installed. The model files
+/// are flushed to disk first and the manifest is written atomically, so after a crash or power
+/// loss a manifest that parses always describes files that are really there; a torn one simply
+/// reads as "not installed".
+pub(crate) fn write_manifest(dir: &Path, manifest: &ModelManifest) -> Result<()> {
+    sync_tree(dir)?;
+    let json = serde_json::to_string_pretty(manifest)?;
+    crate::config::write_atomic(&dir.join("manifest.json"), json.as_bytes())?;
+    sync_dir(dir);
+    Ok(())
+}
+
+/// Flush every file under `dir` (and, where the OS allows, the folders) to disk.
+fn sync_tree(dir: &Path) -> Result<()> {
+    for entry in walkdir::WalkDir::new(dir) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            // Flushing needs write access on Windows (FlushFileBuffers). Opening for write
+            // does not truncate or change the file.
+            let file = match std::fs::OpenOptions::new().write(true).open(entry.path()) {
+                Ok(file) => file,
+                // A read-only file from an archive: nothing we can flush, and not worth
+                // failing the install over.
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue,
+                Err(e) => return Err(e.into()),
+            };
+            file.sync_all()?;
+        } else if entry.file_type().is_dir() {
+            sync_dir(entry.path());
+        }
+    }
+    Ok(())
+}
+
+/// Make new or renamed entries in `dir` durable. Only possible (and only needed) on Unix;
+/// best effort, since some file systems refuse it.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /// Relative file paths (forward slashes) and total size of a directory tree.

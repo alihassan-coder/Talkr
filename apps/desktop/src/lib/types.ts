@@ -258,3 +258,7 @@ export interface JobErrorEvent {
   error: string
   cancelled: boolean
 }
+
+export interface MicErrorEvent {
+  message: string
+}

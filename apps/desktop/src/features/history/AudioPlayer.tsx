@@ -7,8 +7,19 @@ import { formatClock, hashSeed } from './utils'
 import { useAudioUrl } from '@/lib/useAudioUrl'
 
 /** Minimal player: play/pause, a seekable waveform and mono time. Key it by item id to reset. */
-export function AudioPlayer({ path, seed, fallbackDurationMs }: { path: string; seed: string; fallbackDurationMs: number | null }) {
-  const { url, error } = useAudioUrl(path)
+export function AudioPlayer({
+  id,
+  path,
+  seed,
+  fallbackDurationMs,
+}: {
+  /** History item id; the backend reads its audio. */
+  id: string
+  path: string
+  seed: string
+  fallbackDurationMs: number | null
+}) {
+  const { url, error } = useAudioUrl(id, path)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)

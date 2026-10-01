@@ -17,6 +17,7 @@ import type {
   JobDoneEvent,
   JobErrorEvent,
   JobProgressEvent,
+  MicErrorEvent,
   ModelKind,
   PartialSettings,
   RecordingResult,
@@ -45,6 +46,7 @@ export const updateSettings = (args: { settings: PartialSettings }) => invoke<Se
 
 /** Open ~/.talkr in the system file manager. */
 export const openDataFolder = () => invoke<void>('open_data_folder')
+export const stopEngine = () => invoke<void>('stop_engine')
 
 export const getStorageUsage = () => invoke<StorageUsage>('get_storage_usage')
 
@@ -143,6 +145,7 @@ export const EVENTS = {
   ttsDone: 'tts://done',
   sttDone: 'stt://done',
   micLevel: 'mic://level',
+  micError: 'mic://error',
 } as const
 
 export const onDownloadProgress = (cb: (p: DownloadProgress) => void): Promise<UnlistenFn> =>
@@ -164,6 +167,10 @@ export const onSttDone = (cb: (p: JobDoneEvent) => void): Promise<UnlistenFn> =>
 export const onMicLevel = (cb: (level: number) => void): Promise<UnlistenFn> =>
   listen<number>(EVENTS.micLevel, (e) => cb(e.payload))
 
+/** The microphone failed or was disconnected while recording; the recording has ended. */
+export const onMicError = (cb: (p: MicErrorEvent) => void): Promise<UnlistenFn> =>
+  listen<MicErrorEvent>(EVENTS.micError, (e) => cb(e.payload))
+
 // ---------- helpers ----------
 
 export const parseSegments = (item: HistoryItem): TranscriptSegment[] => {
@@ -175,5 +182,8 @@ export const parseSegments = (item: HistoryItem): TranscriptSegment[] => {
   }
 }
 
-/** Read Talkr-owned audio as raw bytes, avoiding custom-protocol media bugs in WebKitGTK. */
-export const readAudioFile = (args: { path: string }) => invoke<ArrayBuffer>('read_audio_file', args)
+/**
+ * Read the audio of a history item as raw bytes (the backend resolves the file from the id),
+ * avoiding custom-protocol media bugs in WebKitGTK.
+ */
+export const readHistoryAudio = (args: { id: string }) => invoke<ArrayBuffer>('read_history_audio', args)

@@ -10,7 +10,16 @@ import { AUDIO_EXTENSIONS, isAudioPath } from './utils'
 
 const unsupported = 'That file type is not supported. Try MP3, WAV, FLAC, OGG or M4A.'
 
-export function DropZone({ onFile, disabled = false }: { onFile: (path: string) => void; disabled?: boolean }) {
+export function DropZone({
+  onFile,
+  disabled = false,
+  disabledReason = null,
+}: {
+  onFile: (path: string) => void
+  disabled?: boolean
+  /** Shown under the button while disabled, e.g. "Wait for speech generation to finish." */
+  disabledReason?: string | null
+}) {
   const [over, setOver] = useState(false)
 
   const handleDrop = useEffectEvent((paths: string[]) => {
@@ -69,9 +78,19 @@ export function DropZone({ onFile, disabled = false }: { onFile: (path: string) 
       </span>
       <p className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{over ? 'Release to transcribe' : 'Drop an audio file'}</p>
       <p className="mt-1.5 font-mono text-[11px] tracking-wide text-subtle">MP3, WAV, FLAC, OGG, M4A</p>
-      <Button className="mt-6" onClick={() => void choose()} disabled={disabled}>
+      <Button
+        className="mt-6"
+        onClick={() => void choose()}
+        disabled={disabled}
+        aria-describedby={disabled && disabledReason ? 'dropzone-blocked' : undefined}
+      >
         Choose file
       </Button>
+      {disabled && disabledReason ? (
+        <p id="dropzone-blocked" className="mt-3 text-[12px] text-muted">
+          {disabledReason}
+        </p>
+      ) : null}
     </div>
   )
 }

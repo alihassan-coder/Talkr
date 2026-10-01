@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { HistoryPage } from '@/pages/HistoryPage'
-import { historyFixture, mockBackend, pathsFixture } from '@/test/tauri'
+import { flush, historyFixture, mockBackend, pathsFixture, reject } from '@/test/tauri'
 import type { HistoryItem } from '@/lib/types'
 
 const items: HistoryItem[] = [
@@ -30,7 +30,7 @@ function backendWith(list: HistoryItem[]) {
       return null
     },
     history_toggle_favorite: (args: Record<string, unknown>) => !current.find((i) => i.id === args.id)?.favorite,
-    read_audio_file: new ArrayBuffer(44),
+    read_history_audio: new ArrayBuffer(44),
   })
 }
 
@@ -63,8 +63,8 @@ describe('HistoryPage', () => {
     renderPage()
     await screen.findByText('Q3 planning call')
     await user.type(screen.getByRole('searchbox', { name: 'Search history' }), 'revenue')
-    await waitFor(() => expect(screen.queryByText('Welcome message')).not.toBeInTheDocument())
-    expect(screen.getByText('Q3 planning call')).toBeInTheDocument()
+    await waitFor(() => expect(backend.argsOf('history_list').at(-1)).toMatchObject({ query: 'revenue' }))
+    expect(await screen.findByText('Q3 planning call')).toBeInTheDocument()
     expect(screen.queryByText('Welcome message')).not.toBeInTheDocument()
     expect(backend.argsOf('history_list').at(-1)).toMatchObject({ query: 'revenue' })
 
@@ -106,5 +106,94 @@ describe('HistoryPage', () => {
     await user.click(screen.getAllByRole('button', { name: 'Add to favorites' })[0]!)
     expect(backend.argsOf('history_toggle_favorite')).toEqual([{ id: 'a' }])
     expect(await screen.findByRole('button', { name: 'Remove from favorites' })).toBeInTheDocument()
+  })
+
+  it('drops a Load more page that arrives after the filters changed', async () => {
+    const older = historyFixture({ id: 'old', title: 'Old unfiltered item', kind: 'stt' })
+    let releaseMore!: () => void
+    const backend = mockBackend({
+      history_list: (args: Record<string, unknown>) => {
+        if (args.cursor) {
+          return new Promise((r) => (releaseMore = () => r({ items: [older], nextCursor: null })))
+        }
+        return args.kind === 'tts' ? { items: [items[1]], nextCursor: null } : { items: [items[0]], nextCursor: 42 }
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Load more' }))
+    await user.click(screen.getByRole('tab', { name: 'Speech' }))
+    expect(await screen.findByText('Welcome message')).toBeInTheDocument()
+    await act(async () => releaseMore())
+    await flush()
+    expect(screen.queryByText('Old unfiltered item')).not.toBeInTheDocument()
+    expect(backend.argsOf('history_list').filter((a) => a.cursor === 42)).toHaveLength(1)
+  })
+
+  it('hides the old list while the first page for new filters loads', async () => {
+    let releaseTts!: () => void
+    mockBackend({
+      history_list: (args: Record<string, unknown>) =>
+        args.kind === 'tts'
+          ? new Promise((r) => (releaseTts = () => r({ items: [items[1]], nextCursor: null })))
+          : { items, nextCursor: null },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Q3 planning call')
+    await user.click(screen.getByRole('tab', { name: 'Speech' }))
+    expect(screen.getByRole('status', { name: 'Loading history' })).toBeInTheDocument()
+    expect(screen.queryByText('Q3 planning call')).not.toBeInTheDocument()
+    await act(async () => releaseTts())
+    expect(await screen.findByText('Welcome message')).toBeInTheDocument()
+  })
+
+  it('shows a load error with a retry', async () => {
+    let fail = true
+    mockBackend({
+      history_list: () => (fail ? reject('database is locked')() : { items, nextCursor: null }),
+    })
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByText('Could not load history')).toBeInTheDocument()
+    expect(screen.getByText('database is locked')).toBeInTheDocument()
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Q3 planning call')).toBeInTheDocument()
+  })
+
+  it('moves focus to the details and back to the row when they close', async () => {
+    backendWith(items)
+    const user = userEvent.setup()
+    renderPage()
+    const row = await screen.findByRole('button', { name: /Q3 planning call/ })
+    await user.click(row)
+    const panel = screen.getByRole('complementary', { name: 'Item details' })
+    expect(panel).toHaveFocus()
+    expect(panel.scrollIntoView).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('complementary', { name: 'Item details' })).not.toBeInTheDocument()
+    expect(row).toHaveFocus()
+
+    await user.click(row)
+    await user.keyboard('{Escape}')
+    expect(row).toHaveFocus()
+  })
+
+  it('lays out text by its own direction and reads audio by item id', async () => {
+    const arabic = historyFixture({
+      id: 'ar',
+      title: 'تسجيل',
+      text: 'مرحبا بالعالم',
+      audioPath: 'audio/ar.mp3',
+      segmentsJson: JSON.stringify([{ startMs: 0, endMs: 900, text: 'مرحبا' }]),
+    })
+    const backend = backendWith([arabic])
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByText('مرحبا بالعالم')).toHaveAttribute('dir', 'auto')
+    await user.click(screen.getByRole('button', { name: /تسجيل/ }))
+    expect(screen.getByText('مرحبا')).toHaveAttribute('dir', 'auto')
+    await waitFor(() => expect(backend.argsOf('read_history_audio')).toEqual([{ id: 'ar' }]))
   })
 })

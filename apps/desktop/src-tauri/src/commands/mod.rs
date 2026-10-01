@@ -15,6 +15,7 @@ pub use tts::*;
 use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use crate::commands::models::locate_model;
 use crate::db::HistoryItem;
 use crate::error::AppError;
 use crate::paths::AppPaths;
@@ -26,6 +27,15 @@ pub const EVENT_JOB_ERROR: &str = "job://error";
 pub const EVENT_TTS_DONE: &str = "tts://done";
 pub const EVENT_STT_DONE: &str = "stt://done";
 pub const EVENT_MIC_LEVEL: &str = "mic://level";
+/// The microphone failed mid-recording (unplugged, or the recording could not be saved). Payload:
+/// [`MicErrorEvent`]. What was captured is kept until the UI calls `stop_recording`.
+pub const EVENT_MIC_ERROR: &str = "mic://error";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicErrorEvent {
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,31 +120,81 @@ pub(crate) fn catch_panic<T>(job: impl FnOnce() -> Result<T, AppError>) -> Resul
 /// engine. Running out mid-load does not fail cleanly (Linux's OOM killer, or an abort in
 /// whisper.cpp), so say it up front. The engine runs in its own process, so even when this
 /// estimate is wrong the app survives and engine_host explains what happened.
-pub(crate) fn ensure_memory_for_model(dir: &Path, model_id: &str) -> Result<(), AppError> {
-    let model_bytes: u64 = walkdir::WalkDir::new(dir)
+///
+/// The engine keeps the last model it used loaded, and that memory is already missing from what
+/// the system reports as free: it is not counted again for the same model, and is counted as
+/// free for a different one (switching unloads it). `extra_bytes` is job memory on top of the
+/// model, such as the decoded audio of a transcription.
+pub(crate) fn ensure_memory_for_job(state: &AppState, dir: &Path, model_id: &str, extra_bytes: u64) -> Result<(), AppError> {
+    let resident = match state.engine.resident_model() {
+        None => Resident::Nothing,
+        Some(id) if id == model_id => Resident::Same,
+        Some(id) => Resident::Other(locate_model(&state.paths, &id).map(|(_, dir)| dir_size(&dir)).unwrap_or(0)),
+    };
+    check_memory(dir, model_id, extra_bytes, resident)
+}
+
+fn check_memory(dir: &Path, model_id: &str, extra_bytes: u64, resident: Resident) -> Result<(), AppError> {
+    let model_bytes = dir_size(dir);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    // Swap counts: it is slow, but it keeps the app alive.
+    let available = sys.available_memory() + sys.free_swap();
+    let Some(Shortfall { needed, free }) = memory_shortfall(model_bytes, extra_bytes, available, resident) else {
+        return Ok(());
+    };
+    Err(AppError::Validation(format!(
+        "Not enough free memory to run {}: it needs about {}, and only {} is free.          Close other apps, or pick a smaller or compressed model in Models.",
+        model_id,
+        format_size(needed),
+        format_size(free)
+    )))
+}
+
+/// The model the engine already holds in memory, relative to the one a job needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Resident {
+    Nothing,
+    /// The job's own model: its weights are loaded and already excluded from free memory.
+    Same,
+    /// Another model, with this many bytes on disk; switching frees about that much.
+    Other(u64),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Shortfall {
+    pub needed: u64,
+    pub free: u64,
+}
+
+/// The memory arithmetic, apart from asking the system. `available` is free RAM plus swap
+/// (0 when unknown, which never blocks). Returns what is needed and free when it does not fit.
+pub(crate) fn memory_shortfall(model_bytes: u64, extra_bytes: u64, available: u64, resident: Resident) -> Option<Shortfall> {
+    if available == 0 {
+        return None;
+    }
+    // Weights plus the engine's compute buffers, which run to about half the weights again.
+    let weights = match resident {
+        Resident::Same => 0,
+        _ => model_bytes,
+    };
+    let needed = weights + model_bytes / 2 + extra_bytes + 150 * MB;
+    let free = match resident {
+        Resident::Other(bytes) => available.saturating_add(bytes),
+        _ => available,
+    };
+    (free < needed).then_some(Shortfall { needed, free })
+}
+
+/// Total size of the files under `dir` (a model's weights and data).
+fn dir_size(dir: &Path) -> u64 {
+    walkdir::WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| e.metadata().ok())
         .filter(|m| m.is_file())
         .map(|m| m.len())
-        .sum();
-    // Weights plus the engine's compute buffers, which run to about half the weights again.
-    let needed = model_bytes + model_bytes / 2 + 150 * MB;
-
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    // Swap counts: it is slow, but it keeps the app alive.
-    let free = sys.available_memory() + sys.free_swap();
-    if free == 0 || free >= needed {
-        return Ok(());
-    }
-    Err(AppError::Validation(format!(
-        "Not enough free memory to run {}: it needs about {}, and only {} is free. \
-         Close other apps, or pick a smaller or compressed model in Models.",
-        model_id,
-        format_size(needed),
-        format_size(free)
-    )))
+        .sum()
 }
 
 const MB: u64 = 1024 * 1024;
@@ -277,6 +337,55 @@ mod tests {
         assert!(!owned.exists());
         assert!(user_file.exists(), "user files must never be deleted");
         assert!(folder.is_dir(), "folders are not files");
+    }
+
+    const GB: u64 = 1024 * MB;
+
+    #[test]
+    fn memory_fits_or_reports_the_shortfall() {
+        // 1 GB of weights needs 1.5 GB plus 150 MB of headroom.
+        assert_eq!(memory_shortfall(GB, 0, 2 * GB, Resident::Nothing), None);
+        assert_eq!(
+            memory_shortfall(GB, 0, GB, Resident::Nothing),
+            Some(Shortfall { needed: GB + GB / 2 + 150 * MB, free: GB })
+        );
+        // Unknown free memory never blocks.
+        assert_eq!(memory_shortfall(100 * GB, 0, 0, Resident::Nothing), None);
+    }
+
+    #[test]
+    fn memory_counts_the_resident_model_once() {
+        // Already loaded: only the compute buffers and headroom are new.
+        assert_eq!(memory_shortfall(GB, 0, GB, Resident::Same), None);
+        assert_eq!(
+            memory_shortfall(GB, 0, 600 * MB, Resident::Same),
+            Some(Shortfall { needed: GB / 2 + 150 * MB, free: 600 * MB })
+        );
+        // Another model is loaded: switching frees it.
+        assert_eq!(memory_shortfall(GB, 0, GB, Resident::Other(GB)), None);
+        assert_eq!(
+            memory_shortfall(2 * GB, 0, GB, Resident::Other(GB)),
+            Some(Shortfall { needed: 3 * GB + 150 * MB, free: 2 * GB })
+        );
+    }
+
+    #[test]
+    fn memory_includes_job_extras() {
+        // An hour of decoded 16 kHz mono f32 audio is about 220 MB.
+        let audio = 3600 * 64_000;
+        assert_eq!(memory_shortfall(GB, 0, 1700 * MB, Resident::Nothing), None);
+        assert!(memory_shortfall(GB, audio, 1700 * MB, Resident::Nothing).is_some());
+        assert_eq!(memory_shortfall(GB, audio, 1700 * MB, Resident::Same), None);
+    }
+
+    #[test]
+    fn dir_size_sums_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        std::fs::write(dir.path().join("x.bin"), [0u8; 10]).unwrap();
+        std::fs::write(dir.path().join("a/b/y.bin"), [0u8; 5]).unwrap();
+        assert_eq!(dir_size(dir.path()), 15);
+        assert_eq!(dir_size(&dir.path().join("missing")), 0);
     }
 
     #[test]

@@ -14,6 +14,8 @@ import {
   synthesize,
 } from '@/lib/api'
 import type { HistoryItem, InstalledModel, Voice } from '@/lib/types'
+import { errorText } from '@/lib/errors'
+import { useJobs } from '@/stores/jobs'
 import { toast, toastError } from '@/stores/toast'
 import { AudioPlayer } from '@/features/speak/AudioPlayer'
 import { PreviewNotice } from '@/features/speak/PreviewNotice'
@@ -35,26 +37,29 @@ export function SpeakPage() {
   const [voiceId, setVoiceId] = useState('')
   const [speed, setSpeed] = useState(1)
   const [text, setText] = useState('')
-  const [current, setCurrent] = useState<{ item: HistoryItem; autoPlay: boolean } | null>(null)
+  // A recent item the user picked; `afterSeq` is the job result it was picked after.
+  const [picked, setPicked] = useState<{ item: HistoryItem; afterSeq: number } | null>(null)
   const [recent, setRecent] = useState<HistoryItem[]>([])
+  const [recentError, setRecentError] = useState<string | null>(null)
+  const [recentReload, setRecentReload] = useState(0)
 
-  const job = useJob('tts', (item) => {
-    setCurrent({ item, autoPlay: true })
-    fetchRecent().then(setRecent).catch(() => {})
-  })
+  // The job lives in a store, so a result that finished while the user was elsewhere is shown
+  // on return, but only plays by itself when it arrives while the page is open.
+  const job = useJob('tts')
+  const [mountSeq] = useState(() => useJobs.getState().tts.result?.seq ?? 0)
+  const resultSeq = job.result?.seq ?? 0
 
   useEffect(() => {
     if (!tauri) return
     let alive = true
-    Promise.all([listInstalledModels(), getSettings(), fetchRecent()])
-      .then(([installed, settings, items]) => {
+    Promise.all([listInstalledModels(), getSettings()])
+      .then(([installed, settings]) => {
         if (!alive) return
         const tts = installed.filter((m) => m.kind === 'tts')
         setModels(tts)
         setModelId((tts.find((m) => m.id === settings.defaultTtsModel) ?? tts[0])?.id ?? '')
         setDefaultVoice(settings.defaultVoice)
         setSpeed(settings.speechRate > 0 ? settings.speechRate : 1)
-        setRecent(items)
       })
       .catch((err: unknown) => {
         if (!alive) return
@@ -65,6 +70,24 @@ export function SpeakPage() {
       alive = false
     }
   }, [tauri])
+
+  // Recent items: on open, after every finished job, and on Retry.
+  useEffect(() => {
+    if (!tauri) return
+    let alive = true
+    fetchRecent()
+      .then((items) => {
+        if (!alive) return
+        setRecent(items)
+        setRecentError(null)
+      })
+      .catch((err: unknown) => {
+        if (alive) setRecentError(errorText(err))
+      })
+    return () => {
+      alive = false
+    }
+  }, [tauri, resultSeq, recentReload])
 
   // Loading voices also warms up the engine, so the first Generate is quicker.
   useEffect(() => {
@@ -88,7 +111,7 @@ export function SpeakPage() {
     }
   }, [modelId, defaultVoice])
 
-  const canGenerate = tauri && text.trim().length > 0 && !!modelId && !!voiceId && !job.running
+  const canGenerate = tauri && text.trim().length > 0 && !!modelId && !!voiceId && !job.running && !job.blockedBy
 
   const generate = () => {
     if (!canGenerate) return
@@ -113,7 +136,7 @@ export function SpeakPage() {
     return (
       <div className="space-y-8">
         <Header />
-        <Progress value={null} className="mx-auto max-w-40" />
+        <Progress value={null} label="Loading" className="mx-auto max-w-40" />
       </div>
     )
   }
@@ -127,7 +150,7 @@ export function SpeakPage() {
           title="No voice installed yet"
           description="Download Kokoro or a Piper voice from the Models page. It takes about a minute."
           action={
-            <Button variant="primary" onClick={() => navigate('/models')}>
+            <Button variant="primary" onClick={() => navigate('/models?kind=tts')}>
               Browse models
             </Button>
           }
@@ -136,6 +159,12 @@ export function SpeakPage() {
     )
   }
 
+  const current =
+    job.result && (!picked || job.result.seq > picked.afterSeq)
+      ? { item: job.result.item, autoPlay: job.result.seq > mountSeq }
+      : picked
+        ? { item: picked.item, autoPlay: true }
+        : null
   const currentItem = current?.item ?? null
 
   return (
@@ -148,6 +177,7 @@ export function SpeakPage() {
         <Card className="transition-colors duration-200 focus-within:border-line-strong">
           <textarea
             value={text}
+            dir="auto"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -199,6 +229,11 @@ export function SpeakPage() {
           <SpeedControl value={speed} onChange={setSpeed} />
 
           <div className="ml-auto flex items-center gap-3">
+            {job.blockedBy ? (
+              <span id="generate-blocked" className="text-[12px] text-muted">
+                {job.blockedBy}
+              </span>
+            ) : null}
             <span className="hidden text-[12px] text-subtle md:inline">
               <Kbd>Ctrl ⏎</Kbd>
             </span>
@@ -208,6 +243,7 @@ export function SpeakPage() {
               icon={<AudioLines className="size-4" strokeWidth={2} />}
               loading={job.running}
               disabled={!canGenerate}
+              aria-describedby={job.blockedBy ? 'generate-blocked' : undefined}
               onClick={generate}
             >
               {job.running ? 'Generating' : 'Generate'}
@@ -225,10 +261,10 @@ export function SpeakPage() {
                 <span className="font-mono text-[11px] tabular-nums text-subtle">{Math.round(job.progress * 100)}%</span>
               )}
             </div>
-            <Progress value={job.progress} />
+            <Progress value={job.progress} label="Generating speech" />
           </div>
-          <Button variant="ghost" size="sm" onClick={() => void job.cancel()}>
-            Cancel
+          <Button variant="ghost" size="sm" disabled={job.cancelRequested} onClick={() => void job.cancel()}>
+            {job.cancelRequested ? 'Cancelling…' : 'Cancel'}
           </Button>
         </Card>
       ) : null}
@@ -242,6 +278,7 @@ export function SpeakPage() {
       {currentItem?.audioPath ? (
         <AudioPlayer
           key={currentItem.id}
+          id={currentItem.id}
           path={currentItem.audioPath}
           seed={currentItem.text.length}
           autoPlay={current?.autoPlay}
@@ -263,10 +300,24 @@ export function SpeakPage() {
         />
       ) : null}
 
+      {recentError ? (
+        <Notice
+          tone="error"
+          title="Could not load recent speech"
+          action={
+            <Button size="sm" onClick={() => setRecentReload((n) => n + 1)}>
+              Retry
+            </Button>
+          }
+        >
+          {recentError}
+        </Notice>
+      ) : null}
+
       <RecentList
         items={recent}
         activeId={currentItem?.id ?? null}
-        onSelect={(item) => setCurrent({ item, autoPlay: true })}
+        onSelect={(item) => setPicked({ item, afterSeq: resultSeq })}
       />
     </div>
   )

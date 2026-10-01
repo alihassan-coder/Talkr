@@ -89,11 +89,20 @@ enum Search {
     Match(String),
 }
 
+/// Longest search query used, in characters; the rest is ignored.
+const MAX_SEARCH_CHARS: usize = 1_000;
+
 /// Turn free-form user input into a safe FTS5 query: each word becomes a quoted prefix term, so
 /// FTS5 syntax in the input (`AND`, `NEAR(`, `col:`, `-`, `*`, quotes) is searched for as text
 /// instead of being interpreted. Words without a letter or digit are dropped, since the
 /// tokenizer would reduce them to an empty phrase.
 fn fts_query(q: &str) -> Search {
+    // Only the start of an over-long query is used: every word becomes an FTS5 term that must
+    // match, so a pasted page of text would cost a lot and could never match anyway.
+    let q = match q.char_indices().nth(MAX_SEARCH_CHARS) {
+        Some((end, _)) => &q[..end],
+        None => q,
+    };
     if q.trim().is_empty() {
         return Search::All;
     }
@@ -484,6 +493,24 @@ mod tests {
         assert_eq!(fts_query("hello"), Search::Match("\"hello\"*".into()));
         assert_eq!(fts_query("a \"b\" c"), Search::Match("\"a\"* \"b\"* \"c\"*".into()));
         assert_eq!(fts_query("say\"what"), Search::Match("\"saywhat\"*".into()));
+    }
+
+    #[test]
+    fn long_search_queries_are_cut() {
+        // 2 000 one-letter words: only the first 1 000 characters (500 words) are searched.
+        let long = "é ".repeat(1_000);
+        let Search::Match(q) = fts_query(&long) else { panic!("expected a match query") };
+        assert_eq!(q.matches("\"é\"*").count(), 500);
+        // Exactly at the limit nothing is cut.
+        let exact = format!("{}b", "a".repeat(MAX_SEARCH_CHARS - 1));
+        assert_eq!(fts_query(&exact), Search::Match(format!("\"{}\"*", exact)));
+
+        let (_dir, paths) = temp_paths();
+        insert_history(&paths, &item("a", HistoryKind::Tts, 1, "alpha", "x")).unwrap();
+        let huge = format!("alpha {}", "zz ".repeat(100_000));
+        // Still a valid query, and the words beyond the cut do not take part.
+        assert!(search(&paths, &huge).is_empty(), "the kept words include ones that do not match");
+        assert_eq!(search(&paths, &format!("alpha{}", " ".repeat(5_000))), ["a"]);
     }
 
     #[test]

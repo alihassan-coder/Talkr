@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useSearchParams } from 'react-router'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { Download, FolderOpen, Import, RotateCw, Trash2, TriangleAlert, X } from 'lucide-react'
 import { isTauri, openDataFolder } from '@/lib/api'
@@ -48,7 +49,9 @@ export function ModelsPage() {
   const loaded = useModels((s) => s.loaded)
   const error = useModels((s) => s.error)
   const refresh = useModels((s) => s.refresh)
-  const [kind, setKind] = useState<ModelKind>('stt')
+  // Other screens link here with ?kind=tts or ?kind=stt to open the right list.
+  const [searchParams] = useSearchParams()
+  const [kind, setKind] = useState<ModelKind>(() => (searchParams.get('kind') === 'tts' ? 'tts' : 'stt'))
 
   useEffect(() => {
     initModels()
@@ -263,7 +266,7 @@ function ModelRow({
 
       <div className="flex shrink-0 items-center justify-end">
         {download ? (
-          <DownloadStatus download={download} onCancel={() => void cancel(model.id)} />
+          <DownloadStatus name={model.name} download={download} onCancel={() => void cancel(model.id)} />
         ) : installed ? (
           <div className="flex items-center gap-1.5">
             <Badge>Installed</Badge>
@@ -312,7 +315,15 @@ const STATE_LABELS: Partial<Record<ActiveDownload['state'], string>> = {
   extracting: 'Unpacking',
 }
 
-function DownloadStatus({ download, onCancel }: { download: ActiveDownload; onCancel: () => void }) {
+function DownloadStatus({
+  name,
+  download,
+  onCancel,
+}: {
+  name: string
+  download: ActiveDownload
+  onCancel: () => void
+}) {
   const label =
     download.progress === null
       ? (STATE_LABELS[download.state] ?? 'Starting')
@@ -334,7 +345,7 @@ function DownloadStatus({ download, onCancel }: { download: ActiveDownload; onCa
             </span>
           ) : null}
         </div>
-        <Progress value={download.progress} />
+        <Progress value={download.progress} label={`Downloading ${name}`} />
       </div>
       <IconButton label="Cancel download" onClick={onCancel}>
         <X className="size-4" strokeWidth={1.75} />
@@ -375,19 +386,37 @@ function DeleteButton({ onConfirm }: { onConfirm: () => void }) {
   )
 }
 
+const menuItems = (menu: HTMLElement | null) =>
+  Array.from(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])
+
 function ImportMenu() {
   const importModel = useModels((s) => s.importModel)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const items = () => menuItems(menuRef.current)
+
+  const close = (restoreFocus: boolean) => {
+    setOpen(false)
+    if (restoreFocus) triggerRef.current?.focus()
+  }
 
   useEffect(() => {
     if (!open) return
+    // Focus moves into the menu when it opens.
+    menuItems(menuRef.current)[0]?.focus()
     const onPointer = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
     }
     window.addEventListener('pointerdown', onPointer)
     window.addEventListener('keydown', onKey)
@@ -397,8 +426,24 @@ function ImportMenu() {
     }
   }, [open])
 
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const list = items()
+    if (list.length === 0) return
+    const index = list.indexOf(document.activeElement as HTMLElement)
+    let next: number | null = null
+    if (e.key === 'ArrowDown') next = (index + 1) % list.length
+    else if (e.key === 'ArrowUp') next = (index - 1 + list.length) % list.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = list.length - 1
+    else if (e.key === 'Tab') close(false)
+    if (next !== null) {
+      e.preventDefault()
+      list[next]?.focus()
+    }
+  }
+
   const pick = async (kind: ModelKind) => {
-    setOpen(false)
+    close(true)
     if (!isTauri()) {
       toast('Importing works in the Talkr desktop app')
       return
@@ -422,17 +467,29 @@ function ImportMenu() {
   return (
     <div ref={ref} className="relative">
       <Button
+        ref={triggerRef}
         loading={busy}
         icon={<Import className="size-3.5" strokeWidth={1.75} />}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? 'import-menu' : undefined}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault()
+            setOpen(true)
+          }
+        }}
       >
         Import model
       </Button>
       {open ? (
         <div
+          ref={menuRef}
+          id="import-menu"
           role="menu"
+          aria-label="Import model"
+          onKeyDown={onMenuKeyDown}
           className="absolute right-0 top-full z-20 mt-2 w-64 animate-rise rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow-pop)]"
         >
           <MenuItem title="Speech to text" detail="Whisper GGML file · .bin" onClick={() => void pick('stt')} />
@@ -448,8 +505,9 @@ function MenuItem({ title, detail, onClick }: { title: string; detail: string; o
     <button
       type="button"
       role="menuitem"
+      tabIndex={-1}
       onClick={onClick}
-      className="block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-200 hover:bg-fg/[0.06]"
+      className="block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-200 hover:bg-fg/[0.06] focus-visible:bg-fg/[0.06]"
     >
       <span className="block text-[13px] font-medium">{title}</span>
       <span className="mt-0.5 block font-mono text-[11px] text-subtle">{detail}</span>

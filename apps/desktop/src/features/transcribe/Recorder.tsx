@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { cx } from '@/lib/cx'
-import { isTauri, onMicLevel, startRecording, stopRecording } from '@/lib/api'
+import { isTauri, onMicError, onMicLevel, startRecording, stopRecording } from '@/lib/api'
+import { errorText } from '@/lib/errors'
 import { toast, toastError } from '@/stores/toast'
 import { formatDuration } from '@/features/speak/utils'
 
@@ -13,16 +14,23 @@ const toHeight = (level: number) => Math.min(1, Math.sqrt(Math.max(0, level)) * 
 export function Recorder({
   onRecorded,
   disabled = false,
+  disabledReason = null,
 }: {
   onRecorded: (path: string, durationMs: number) => void
   disabled?: boolean
+  /** Shown while disabled, e.g. "Wait for speech generation to finish." */
+  disabledReason?: string | null
 }) {
   const [recording, setRecording] = useState(false)
   const [busy, setBusy] = useState(false)
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(0)
   const [levels, setLevels] = useState(silence)
+  const [micError, setMicError] = useState<string | null>(null)
   const recordingRef = useRef(false)
+  // startRecording() is in flight: the microphone may open after the user has left.
+  const startingRef = useRef(false)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     if (!recording) return
@@ -34,13 +42,37 @@ export function Recorder({
     }
   }, [recording])
 
-  // Leaving the screen mid-recording releases the microphone.
-  useEffect(
-    () => () => {
-      if (recordingRef.current) stopRecording().catch(() => {})
-    },
-    [],
-  )
+  // Leaving the screen mid-recording releases the microphone. If it is still opening,
+  // `start` releases it as soon as it opens.
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (recordingRef.current) {
+        recordingRef.current = false
+        stopRecording().catch(() => {})
+      }
+    }
+  }, [])
+
+  // The microphone failed or was unplugged: the backend ended the recording.
+  const handleMicError = useEffectEvent((message: string) => {
+    if (!recordingRef.current && !startingRef.current) return
+    recordingRef.current = false
+    setRecording(false)
+    setLevels(silence())
+    setMicError(message ? errorText(message) : 'The microphone stopped working.')
+    // Release whatever is left of the capture; it may already be gone.
+    stopRecording().catch(() => {})
+  })
+
+  useEffect(() => {
+    if (!isTauri()) return
+    const unlisten = onMicError((e) => handleMicError(e.message))
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => {})
+    }
+  }, [])
 
   const start = async () => {
     if (!isTauri()) {
@@ -48,8 +80,15 @@ export function Recorder({
       return
     }
     setBusy(true)
+    setMicError(null)
+    startingRef.current = true
     try {
       await startRecording()
+      if (!mountedRef.current) {
+        // The user left while the microphone was opening.
+        stopRecording().catch(() => {})
+        return
+      }
       const t = Date.now()
       setStartedAt(t)
       setNow(t)
@@ -57,9 +96,10 @@ export function Recorder({
       recordingRef.current = true
       setRecording(true)
     } catch (err) {
-      toastError(err)
+      if (mountedRef.current) setMicError(errorText(err))
     } finally {
-      setBusy(false)
+      startingRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
   }
 
@@ -103,8 +143,21 @@ export function Recorder({
 
       <p className="mt-7 font-mono text-4xl font-light tabular-nums tracking-tight">{formatDuration(elapsed)}</p>
       <p className="mt-2 text-[13px] text-muted">
-        {busy ? (recording ? 'Saving…' : 'Opening microphone…') : recording ? 'Listening. Click to stop.' : 'Click to record'}
+        {busy
+          ? recording
+            ? 'Saving…'
+            : 'Opening microphone…'
+          : recording
+            ? 'Listening. Click to stop.'
+            : disabled && disabledReason
+              ? disabledReason
+              : 'Click to record'}
       </p>
+      {micError && !recording ? (
+        <p role="alert" data-selectable className="mt-3 max-w-sm text-center text-[12.5px] leading-relaxed text-fg">
+          {micError}
+        </p>
+      ) : null}
 
       <div className="mt-8 flex h-10 items-center gap-[3px]" aria-hidden="true">
         {levels.map((level, i) => {

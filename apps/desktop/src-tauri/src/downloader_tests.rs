@@ -79,6 +79,10 @@ struct ServerState {
     stall_after: Option<usize>,
     /// Answer range requests with a 206 that starts at byte 0 (a broken server).
     wrong_range_start: bool,
+    /// Send GET bodies without a Content-Length (the body ends when the connection closes).
+    no_length: bool,
+    /// Size HEAD reports instead of the real one.
+    head_len: Option<usize>,
     log: Vec<Logged>,
 }
 
@@ -98,6 +102,8 @@ impl TestServer {
             get_status: None,
             stall_after: None,
             wrong_range_start: false,
+            no_length: false,
+            head_len: None,
             log: Vec::new(),
         }));
         let shared = state.clone();
@@ -164,7 +170,7 @@ fn handle_connection(mut stream: TcpStream, state: &Mutex<ServerState>) -> std::
         }
         let (status, body): (u16, Vec<u8>) = if method == "HEAD" {
             if s.head_status == 200 {
-                headers.push(("Content-Length".into(), len.to_string()));
+                headers.push(("Content-Length".into(), s.head_len.unwrap_or(len).to_string()));
                 (200, Vec::new())
             } else {
                 headers.push(("Content-Length".into(), "0".into()));
@@ -201,6 +207,11 @@ fn handle_connection(mut stream: TcpStream, state: &Mutex<ServerState>) -> std::
                     (200, s.body.clone())
                 }
             }
+        };
+        let headers = if s.no_length && method == "GET" {
+            headers.into_iter().filter(|(k, _)| k != "Content-Length").collect()
+        } else {
+            headers
         };
         (status, headers, body, if method == "GET" { s.stall_after } else { None })
     };
@@ -619,9 +630,125 @@ async fn missing_checksum_follows_build_policy() {
     }
 }
 
+#[tokio::test]
+async fn body_larger_than_catalog_size_is_stopped_and_discarded() {
+    // No length from HEAD or GET: only the catalog size (plus slack) bounds the stream.
+    let body = pseudo_random(3 * 1024 * 1024, 17);
+    let server = TestServer::start(body.clone(), Some("\"v1\""));
+    server.with(|s| {
+        s.head_status = 405;
+        s.no_length = true;
+    });
+    let h = Harness::new();
+    let (mut job, rx, _) = h.job("stt-huge", "stt", server.url("m.bin"), sha_hex(&body), None);
+    job.size_bytes = 100_000; // limit: 100 000 + 1 MB, well under the 3 MB sent
+
+    let err = job.run().await.unwrap_err();
+    assert!(matches!(err, AppError::Download(ref m) if m.contains("more data than expected")), "{err}");
+    assert_eq!(states(&rx).last(), Some(&DownloadState::Failed));
+    assert!(!h.part("stt-huge").exists(), "the oversized partial file must be deleted");
+    assert!(!h.validator("stt-huge").exists());
+    assert!(!h.paths.model_dir("stt", "stt-huge").exists());
+}
+
+#[tokio::test]
+async fn body_larger_than_head_size_is_stopped() {
+    // HEAD declares fewer bytes than the GET then streams (without a length of its own).
+    let body = pseudo_random(200_000, 18);
+    let server = TestServer::start(body.clone(), Some("\"v1\""));
+    server.with(|s| {
+        s.head_len = Some(50_000);
+        s.no_length = true;
+    });
+    let h = Harness::new();
+    let (job, _rx, _) = h.job("stt-liar", "stt", server.url("m.bin"), sha_hex(&body), None);
+
+    let err = job.run().await.unwrap_err();
+    assert!(err.to_string().contains("more data than expected"), "{err}");
+    assert!(!h.part("stt-liar").exists());
+}
+
+#[tokio::test]
+async fn body_without_length_within_catalog_size_installs() {
+    let body = pseudo_random(80_000, 19);
+    let server = TestServer::start(body.clone(), Some("\"v1\""));
+    server.with(|s| {
+        s.head_status = 405;
+        s.no_length = true;
+    });
+    let h = Harness::new();
+    let (mut job, _rx, _) = h.job("stt-nolen", "stt", server.url("m.bin"), sha_hex(&body), None);
+    job.size_bytes = body.len() as u64;
+
+    job.run().await.expect("a body of the catalog size installs");
+    let dir = h.paths.model_dir("stt", "stt-nolen");
+    assert_eq!(std::fs::read(dir.join("m.bin")).unwrap(), body);
+}
+
+#[tokio::test]
+async fn torn_manifest_does_not_block_a_fresh_download() {
+    let body = pseudo_random(40_000, 20);
+    let sha = sha_hex(&body);
+    let server = TestServer::start(body.clone(), Some("\"v1\""));
+    let h = Harness::new();
+    // A crash mid-install left the model file and half a manifest.
+    let dir = h.paths.model_dir("stt", "stt-torn");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("m.bin"), b"stale").unwrap();
+    std::fs::write(dir.join("manifest.json"), "{\"id\":\"stt-to").unwrap();
+    assert!(ModelManifest::read(&dir).is_none());
+
+    let (job, _rx, _) = h.job("stt-torn", "stt", server.url("m.bin"), sha.clone(), None);
+    job.run().await.expect("re-download over a torn install succeeds");
+
+    assert_eq!(std::fs::read(dir.join("m.bin")).unwrap(), body);
+    let manifest = read_manifest(&dir);
+    assert_eq!(manifest.sha256, sha);
+    assert_eq!(manifest.files, vec!["m.bin".to_string()]);
+    // The atomic write leaves no temp file behind.
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+}
+
+#[test]
+fn write_manifest_replaces_a_torn_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("model.bin"), b"weights").unwrap();
+    std::fs::write(dir.path().join("manifest.json"), "{ torn").unwrap();
+    let manifest = ModelManifest {
+        id: "m".into(),
+        version: "1.0".into(),
+        sha256: "a".repeat(64),
+        installed_at: 1,
+        size_bytes: 7,
+        files: vec!["model.bin".into()],
+    };
+    write_manifest(dir.path(), &manifest).unwrap();
+    assert_eq!(read_manifest(dir.path()).files, manifest.files);
+}
+
 // ---------------------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------------------
+
+#[test]
+fn download_size_limit() {
+    const MB: u64 = 1024 * 1024;
+    // Catalog size plus the larger of 1% and 1 MB.
+    assert_eq!(max_download_bytes(10 * MB, 0), 11 * MB);
+    assert_eq!(max_download_bytes(1000 * MB, 0), 1010 * MB);
+    // A smaller server size wins; a larger one does not raise the cap.
+    assert_eq!(max_download_bytes(1000 * MB, 900 * MB), 900 * MB);
+    assert_eq!(max_download_bytes(10 * MB, 50 * MB), 11 * MB);
+    assert_eq!(max_download_bytes(0, 5 * MB), 5 * MB);
+    // Nothing known: the hard ceiling.
+    assert_eq!(max_download_bytes(0, 0), MAX_DOWNLOAD_BYTES);
+    assert_eq!(MAX_DOWNLOAD_BYTES, 8 * 1024 * MB);
+    assert_eq!(max_download_bytes(u64::MAX, 0), u64::MAX);
+}
 
 #[test]
 fn checksum_policy() {

@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Ask a question
-    url: https://github.com/alihassan-coder/Talkr/discussions
-    about: Get help or talk through an idea with the community.
+    url: https://github.com/alihassan-coder/Talkr/issues/new?template=feature_request.yml
+    about: Questions and ideas go in a feature request; describe what you are trying to do.
+  - name: Report a security vulnerability
+    url: https://github.com/alihassan-coder/Talkr/security/advisories/new
+    about: Report it privately, not in a public issue.

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { AudioWaveform, Mic } from 'lucide-react'
 import { Button, Card, EmptyState, PageHeader, Progress, Segmented } from '@/components/ui'
 import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import { getSettings, isTauri, listInstalledModels, transcribeFile } from '@/lib/api'
-import type { HistoryItem, InstalledModel } from '@/lib/types'
+import type { InstalledModel } from '@/lib/types'
 import { toastError } from '@/stores/toast'
 import { PreviewNotice } from '@/features/speak/PreviewNotice'
 import { useJob } from '@/features/speak/useJob'
@@ -27,11 +27,9 @@ export function TranscribePage() {
   const [modelId, setModelId] = useState('')
   const [language, setLanguage] = useState('auto')
   const [translate, setTranslate] = useState(false)
-  const [activeName, setActiveName] = useState('')
-  const [result, setResult] = useState<{ item: HistoryItem; name: string } | null>(null)
-  const nameRef = useRef('')
-
-  const job = useJob('stt', (item) => setResult({ item, name: nameRef.current }))
+  // The job lives in a store: leaving the page keeps its progress, Cancel and result.
+  const job = useJob('stt')
+  const result = job.result
 
   useEffect(() => {
     if (!tauri) return
@@ -55,13 +53,10 @@ export function TranscribePage() {
   }, [tauri])
 
   const transcribe = (path: string, name: string) => {
-    if (!modelId) return
-    nameRef.current = name
-    setActiveName(name)
-    setResult(null)
+    if (!modelId || job.running || job.blockedBy) return
     // `translate` is ignored by backends that do not support it yet.
     const args = { path, modelId, language, translate }
-    void job.start(() => transcribeFile(args))
+    void job.start(() => transcribeFile(args), { label: name, clearResult: true })
   }
 
   const header = (
@@ -86,7 +81,7 @@ export function TranscribePage() {
     return (
       <div className="space-y-8">
         {header}
-        <Progress value={null} className="mx-auto max-w-40" />
+        <Progress value={null} label="Loading" className="mx-auto max-w-40" />
       </div>
     )
   }
@@ -100,7 +95,7 @@ export function TranscribePage() {
           title="No Whisper model installed"
           description="Whisper Base is a good first pick: small, fast and accurate."
           action={
-            <Button variant="primary" onClick={() => navigate('/models')}>
+            <Button variant="primary" onClick={() => navigate('/models?kind=stt')}>
               Browse models
             </Button>
           }
@@ -144,24 +139,29 @@ export function TranscribePage() {
               <AudioWaveform className="size-4" strokeWidth={1.75} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-medium">{activeName}</p>
+              <p className="truncate text-[14px] font-medium">{job.label}</p>
               <p className="mt-0.5 font-mono text-[11px] tabular-nums text-subtle">
                 {job.progress === null ? 'Transcribing…' : `Transcribing · ${Math.round(job.progress * 100)}%`}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => void job.cancel()}>
-              Cancel
+            <Button variant="ghost" size="sm" disabled={job.cancelRequested} onClick={() => void job.cancel()}>
+              {job.cancelRequested ? 'Cancelling…' : 'Cancel'}
             </Button>
           </div>
-          <Progress value={job.progress} className="mt-4" />
+          <Progress value={job.progress} label="Transcribing" className="mt-4" />
         </Card>
       ) : mode === 'record' ? (
         <Recorder
-          disabled={!modelId && tauri}
+          disabled={(!modelId && tauri) || !!job.blockedBy}
+          disabledReason={job.blockedBy}
           onRecorded={(path, durationMs) => transcribe(path, `Recording · ${formatDuration(durationMs)}`)}
         />
       ) : (
-        <DropZone disabled={!modelId && tauri} onFile={(path) => transcribe(path, baseName(path))} />
+        <DropZone
+          disabled={(!modelId && tauri) || !!job.blockedBy}
+          disabledReason={job.blockedBy}
+          onFile={(path) => transcribe(path, baseName(path))}
+        />
       )}
 
       {job.error ? (
@@ -170,7 +170,7 @@ export function TranscribePage() {
         </Notice>
       ) : null}
 
-      {result ? <TranscriptResult key={result.item.id} item={result.item} name={result.name} /> : null}
+      {result ? <TranscriptResult key={result.item.id} item={result.item} name={result.label} /> : null}
     </div>
   )
 }

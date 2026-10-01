@@ -128,4 +128,62 @@ describe('models store', () => {
     expect(useToasts.getState().toasts.at(-1)?.message).toBe('My model imported')
     expect(backend.count('list_catalog')).toBe(3)
   })
+
+  it('restores the row when cancelling fails, and still sees the install', async () => {
+    let installed: unknown[] = []
+    const backend = mockBackend({
+      ...backendHandlers,
+      list_installed_models: () => installed,
+      cancel_download: reject('could not stop the download'),
+    })
+    const { useModels, initModels, useToasts } = await load()
+    initModels()
+    await flush()
+    await useModels.getState().download('whisper-base')
+    await emitEvent('download://progress', progress({ receivedBytes: 50, totalBytes: 100 }))
+    await useModels.getState().cancel('whisper-base')
+    expect(useModels.getState().downloads['whisper-base']).toMatchObject({ jobId: 'job-1' })
+    expect(useToasts.getState().toasts.at(-1)?.message).toBe('could not stop the download')
+
+    // The job carried on and finished.
+    installed = [installedFixture({ id: 'whisper-base', kind: 'stt' })]
+    await emitEvent('download://progress', progress({ state: 'installed' }))
+    await flush()
+    expect(useModels.getState().downloads).toEqual({})
+    expect(useModels.getState().installedIds).toEqual(['whisper-base'])
+    expect(backend.count('cancel_download')).toBe(1)
+  })
+
+  it('refreshes installed models when a cancelled job ends anyway', async () => {
+    let installed: unknown[] = []
+    mockBackend({ ...backendHandlers, list_installed_models: () => installed })
+    const { useModels, initModels } = await load()
+    initModels()
+    await flush()
+    await useModels.getState().download('whisper-base')
+    await useModels.getState().cancel('whisper-base')
+    installed = [installedFixture({ id: 'whisper-base', kind: 'stt' })]
+    await emitEvent('download://progress', progress({ state: 'installed' }))
+    await flush()
+    expect(useModels.getState().installedIds).toEqual(['whisper-base'])
+  })
+
+  it('refreshes after a failed or cancelled download', async () => {
+    const backend = mockBackend(backendHandlers)
+    const { useModels, initModels } = await load()
+    initModels()
+    await flush()
+    const before = backend.count('list_installed_models')
+    await useModels.getState().download('whisper-base')
+    await emitEvent('download://progress', progress({ state: 'cancelled' }))
+    await flush()
+    expect(backend.count('list_installed_models')).toBe(before + 1)
+  })
+
+  it('keeps working when the hardware cannot be read', async () => {
+    mockBackend({ ...backendHandlers, get_hardware_info: reject('wmi unavailable') })
+    const { useModels } = await load()
+    await useModels.getState().refresh()
+    expect(useModels.getState()).toMatchObject({ catalog, error: null, hardware: null, hardwareError: 'wmi unavailable' })
+  })
 })

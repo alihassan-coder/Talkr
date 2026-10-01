@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { models, sttModels, ttsModels } from '@/lib/models'
 import { VERSION } from '@/lib/releases'
 
 describe('DownloadButton', () => {
-  const renderWith = async (userAgent: string) => {
+  const renderWith = async (userAgent: string, userAgentData?: object) => {
     vi.resetModules()
-    vi.stubGlobal('navigator', { userAgent })
+    vi.stubGlobal('navigator', { userAgent, userAgentData })
     const { DownloadButton } = await import('@/components/DownloadButton')
     render(<DownloadButton />)
     return screen.getByRole('link')
@@ -19,6 +19,20 @@ describe('DownloadButton', () => {
     expect(link).toHaveAttribute(
       'href',
       `https://github.com/alihassan-coder/Talkr/releases/download/v${VERSION}/Talkr_${VERSION}_x64-setup.exe`,
+    )
+  })
+
+  it('switches a Mac to its disk image once the browser reports the architecture', async () => {
+    const link = await renderWith('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)', {
+      platform: 'macOS',
+      getHighEntropyValues: () => Promise.resolve({ architecture: 'x86' }),
+    })
+    expect(link).toHaveTextContent('Download for macOS')
+    await waitFor(() =>
+      expect(link).toHaveAttribute(
+        'href',
+        `https://github.com/alihassan-coder/Talkr/releases/download/v${VERSION}/Talkr_${VERSION}_x64.dmg`,
+      ),
     )
   })
 

@@ -42,6 +42,8 @@ type ModelsState = {
   /** Why the last download of a model failed (e.g. "Not enough disk space…"), until it is retried. */
   failures: Record<string, string>
   hardware: HardwareInfo | null
+  /** Why the hardware could not be read; the rest of the screen still works. */
+  hardwareError: string | null
   modelsBytes: number | null
   loading: boolean
   loaded: boolean
@@ -90,6 +92,7 @@ export const useModels = create<ModelsState>((set, get) => {
     downloads: {},
     failures: {},
     hardware: null,
+    hardwareError: null,
     modelsBytes: null,
     loading: false,
     loaded: false,
@@ -101,11 +104,17 @@ export const useModels = create<ModelsState>((set, get) => {
         return
       }
       set({ loading: true, error: null })
+      let hardwareError: string | null = null
       try {
         const [catalog, installed, hardware, storage] = await Promise.all([
           listCatalog(),
           listInstalledModels(),
-          get().hardware ? Promise.resolve(get().hardware) : getHardwareInfo(),
+          get().hardware
+            ? Promise.resolve(get().hardware)
+            : getHardwareInfo().catch((e: unknown) => {
+                hardwareError = errorText(e)
+                return null
+              }),
           getStorageUsage().catch(() => null),
         ])
         set({
@@ -113,12 +122,13 @@ export const useModels = create<ModelsState>((set, get) => {
           installed,
           installedIds: installed.map((m) => m.id),
           hardware,
+          hardwareError,
           modelsBytes: storage?.modelsBytes ?? null,
           loading: false,
           loaded: true,
         })
       } catch (e) {
-        set({ loading: false, loaded: true, error: errorText(e) })
+        set({ loading: false, loaded: true, error: errorText(e), hardwareError })
       }
     },
 
@@ -157,8 +167,14 @@ export const useModels = create<ModelsState>((set, get) => {
       try {
         // The backend also accepts a model id, which covers a job id that has not arrived yet.
         await cancelDownload({ jobId: job.jobId ?? modelId })
-      } catch {
-        // Already finished or never started: nothing to cancel.
+      } catch (e) {
+        // The job may still be running (or already finished): show its row again so its
+        // progress and final state are not lost, and re-read what is installed.
+        if (job.jobId) cancelledJobs.delete(job.jobId)
+        set((s) => (s.downloads[modelId] ? {} : { downloads: { ...s.downloads, [modelId]: job } }))
+        toastError(e)
+        await get().refresh()
+        if (get().installedIds.includes(modelId)) dropDownload(modelId)
       }
     },
 
@@ -189,7 +205,11 @@ export const useModels = create<ModelsState>((set, get) => {
 
 function handleProgress(p: DownloadProgress) {
   if (cancelledJobs.has(p.jobId)) {
-    if (p.state === 'cancelled' || p.state === 'failed' || p.state === 'installed') cancelledJobs.delete(p.jobId)
+    if (p.state === 'cancelled' || p.state === 'failed' || p.state === 'installed') {
+      cancelledJobs.delete(p.jobId)
+      // The cancel may have come too late: what is on disk decides whether it is installed.
+      void useModels.getState().refresh()
+    }
     return
   }
   const { getState, setState } = useModels
@@ -213,10 +233,12 @@ function handleProgress(p: DownloadProgress) {
       const reason = p.error ? errorText(p.error) : 'The download failed.'
       setState((s) => ({ failures: { ...s.failures, [p.modelId]: reason } }))
       toastError(`${name}: ${reason}`)
+      void getState().refresh()
       return
     }
     case 'cancelled':
       drop()
+      void getState().refresh()
       return
     default: {
       const measurable = p.state === 'downloading' && p.totalBytes > 0

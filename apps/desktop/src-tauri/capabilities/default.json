@@ -15,10 +15,21 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         {
-          "url": "https://*"
+          "url": "https://github.com/alihassan-coder/Talkr"
+        },
+        {
+          "url": "https://github.com/alihassan-coder/Talkr/*"
+        },
+        {
+          "url": "https://talkr-three.vercel.app"
+        },
+        {
+          "url": "https://talkr-three.vercel.app/*"
         }
       ]
     },
-    "log:default"
+    "log:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

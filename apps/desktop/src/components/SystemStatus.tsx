@@ -10,6 +10,8 @@ export function SystemStatus() {
   const navigate = useNavigate()
   const hardware = useModels((s) => s.hardware)
   const downloads = useModels((s) => s.downloads)
+  const hardwareError = useModels((s) => s.hardwareError)
+  const loaded = useModels((s) => s.loaded)
 
   useEffect(() => {
     initModels()
@@ -30,8 +32,13 @@ export function SystemStatus() {
     const chip = accelerated && gpu ? gpu.name : shortCpuName(hardware.cpuName)
     detail = `${chip} · ${formatRam(hardware.ramBytes)}`
   } else if (isTauri()) {
-    title = 'Checking hardware'
-    detail = '…'
+    if (hardwareError || loaded) {
+      title = 'Hardware unknown'
+      detail = hardwareError ?? 'Could not read this computer'
+    } else {
+      title = 'Checking hardware'
+      detail = '…'
+    }
   }
 
   return (
@@ -49,7 +56,7 @@ export function SystemStatus() {
       </p>
       {active.length > 0 ? (
         <div className="mt-3 space-y-1.5">
-          <Progress value={overall} />
+          <Progress value={overall} label="Model downloads" />
           <p className="font-mono text-[11px] text-subtle">
             Downloading {active.length} {active.length === 1 ? 'model' : 'models'}
           </p>

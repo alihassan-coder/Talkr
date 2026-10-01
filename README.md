@@ -23,7 +23,18 @@ Talkr is a free, open-source desktop app for turning speech into text and text i
 
 Grab the latest installer for Windows, macOS, or Linux from the **[download page](https://talkr-three.vercel.app/download)**. Each release includes SHA-256 checksums so you can verify what you downloaded.
 
-Talkr works offline after you download a model. It only connects when you ask it to download a model or check for updates.
+Talkr works offline after you download a model. It only connects when you ask it to download a model, and once at startup to check GitHub Releases for a new version.
+
+**Updates.** When a new version is out, Talkr shows a small banner; *Install and restart* downloads it, verifies its signature, and restarts into the new version. Nothing is installed without that click. (On Windows the installer uses the WebView2 runtime that ships with Windows 10 and 11; on an older system without it, the installer downloads it once.)
+
+## Releases
+
+Releases are cut from tags, in this order:
+
+1. Bump the version everywhere (`node scripts/check-versions.mjs` lists the files and must pass), merge to `master`.
+2. Push the tag: `git tag v0.1.5 && git push origin v0.1.5`. The release workflow runs CI, then builds and signs installers for every platform into a **draft** GitHub Release, together with `latest.json` for the updater and SHA-256 checksums.
+3. Check the draft, then press **Publish**. Only now do installed copies see the update (they read `releases/latest/download/latest.json`).
+4. Only then deploy the website (Vercel). Its download links point at this version's files, which do not exist until the release is published.
 
 ## Run from source
 
@@ -59,6 +70,8 @@ This monorepo contains:
 - `packages/ui` — shared React components
 - `packages/model-catalog` — model metadata and checksums
 - `packages/config` — shared TypeScript and ESLint configuration
+
+Found a security issue? Please report it privately, see [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

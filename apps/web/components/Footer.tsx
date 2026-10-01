@@ -1,13 +1,13 @@
 import { LogoMark } from '@/components/Logo'
 import { Container } from '@/components/ui'
-import { CONTACT_EMAIL, RELEASES_URL, REPO_URL, VERSION } from '@/lib/releases'
+import { ISSUES_URL, RELEASES_URL, REPO_URL, VERSION } from '@/lib/releases'
 
 const links = [
   { href: '/download', label: 'Download' },
   { href: '/privacy', label: 'Privacy' },
   { href: REPO_URL, label: 'GitHub', external: true },
   { href: RELEASES_URL, label: 'Releases', external: true },
-  { href: `mailto:${CONTACT_EMAIL}`, label: 'Contact' },
+  { href: ISSUES_URL, label: 'Contact', external: true },
 ]
 
 export function Footer() {

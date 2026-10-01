@@ -82,6 +82,7 @@ describe('api events', () => {
     ['onTtsDone', api.onTtsDone, 'tts://done'],
     ['onSttDone', api.onSttDone, 'stt://done'],
     ['onMicLevel', api.onMicLevel, 'mic://level'],
+    ['onMicError', api.onMicError, 'mic://error'],
   ] as const)('%s delivers the payload of %s', async (_name, subscribe, event) => {
     mockBackend()
     const cb = vi.fn()
@@ -98,6 +99,7 @@ describe('api events', () => {
       ttsDone: 'tts://done',
       sttDone: 'stt://done',
       micLevel: 'mic://level',
+      micError: 'mic://error',
     })
   })
 })
@@ -112,8 +114,8 @@ describe('api helpers', () => {
 
   it('requests audio through binary IPC', async () => {
     const bytes = new ArrayBuffer(4)
-    const backend = mockBackend({ read_audio_file: bytes })
-    await expect(api.readAudioFile({ path: 'audio/a.wav' })).resolves.toBe(bytes)
-    expect(backend.argsOf('read_audio_file')).toEqual([{ path: 'audio/a.wav' }])
+    const backend = mockBackend({ read_history_audio: bytes })
+    await expect(api.readHistoryAudio({ id: 'job-1' })).resolves.toBe(bytes)
+    expect(backend.argsOf('read_history_audio')).toEqual([{ id: 'job-1' }])
   })
 })

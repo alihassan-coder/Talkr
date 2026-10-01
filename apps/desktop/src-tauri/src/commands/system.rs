@@ -2,6 +2,7 @@ use tauri::{command, ipc::Response, AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use crate::commands::resolve_path;
 use crate::config::{PartialSettings, Settings};
+use crate::db::get_history;
 use crate::error::{AppError, Result};
 use crate::hardware::HardwareInfo;
 use crate::paths::AppPaths;
@@ -53,29 +54,41 @@ pub async fn get_app_paths(state: State<'_, AppState>) -> Result<AppPaths> {
     Ok(state.paths.clone())
 }
 
-/// Read audio owned by Talkr as a raw IPC response. WebKitGTK cannot reliably play media from
-/// Tauri's custom asset protocol, while a Blob URL works in every desktop webview. Canonicalizing
-/// both paths prevents `..` traversal and symlinks from exposing arbitrary user files.
+/// Largest audio file Talkr will hand to the webview. The whole file crosses IPC and is held as a
+/// Blob, so a multi-gigabyte import would stall or crash the window.
+const MAX_PLAYABLE_AUDIO: u64 = 512 * 1024 * 1024;
+
+/// Read the audio of a history item as a raw IPC response. WebKitGTK cannot reliably play media
+/// from Tauri's custom asset protocol, while a Blob URL works in every desktop webview.
+///
+/// The webview names a history item, never a path: it can only read audio that Talkr itself
+/// recorded, generated or was asked to transcribe, and the path comes from the database.
 #[command]
-pub async fn read_audio_file(app: AppHandle, path: String) -> Result<Response> {
+pub async fn read_history_audio(app: AppHandle, id: String) -> Result<Response> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        Ok(Response::new(read_owned_audio(&state.paths, &path)?))
+        Ok(Response::new(read_history_audio_bytes(&state.paths, &id, MAX_PLAYABLE_AUDIO)?))
     })
     .await?
 }
 
-fn read_owned_audio(paths: &AppPaths, path: &str) -> Result<Vec<u8>> {
-    let requested = resolve_path(paths, path);
-    let audio_root = paths
-        .audio
+fn read_history_audio_bytes(paths: &AppPaths, id: &str, max_bytes: u64) -> Result<Vec<u8>> {
+    let item = get_history(paths, id)?.ok_or_else(|| AppError::NotFound("History item not found".into()))?;
+    let stored = item
+        .audio_path
+        .ok_or_else(|| AppError::NotFound("This item has no audio".into()))?;
+    // Canonicalizing resolves symlinks and `..`, so what is checked is what gets read.
+    let canonical = resolve_path(paths, &stored)
         .canonicalize()
-        .map_err(|_| AppError::NotFound("The Talkr audio folder is not available".into()))?;
-    let canonical = requested
-        .canonicalize()
-        .map_err(|_| AppError::NotFound("The audio file is not available".into()))?;
-    if !canonical.starts_with(&audio_root) || !canonical.is_file() {
-        return Err(AppError::Validation("Talkr can only play files from its audio folder".into()));
+        .map_err(|_| AppError::NotFound("The audio file is no longer available. It may have been moved or deleted.".into()))?;
+    let metadata = std::fs::metadata(&canonical)?;
+    if !metadata.is_file() {
+        return Err(AppError::NotFound("The audio file is no longer available. It may have been moved or deleted.".into()));
+    }
+    if metadata.len() > max_bytes {
+        return Err(AppError::Validation(
+            "This audio is too large to play in Talkr. Open it from its folder instead.".into(),
+        ));
     }
     Ok(std::fs::read(canonical)?)
 }
@@ -108,6 +121,14 @@ pub async fn update_settings(app: AppHandle, settings: PartialSettings) -> Resul
     .await?
 }
 
+/// Stop the engine process before an update installs: on Windows the installer must replace
+/// talkr-engine.exe, which it cannot do while the engine is running. The next job starts it again.
+#[command]
+pub async fn stop_engine(app: AppHandle) -> Result<()> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().engine.shutdown()).await?;
+    Ok(())
+}
+
 #[command]
 pub async fn open_data_folder(state: State<'_, AppState>, app: AppHandle) -> Result<()> {
     let path = state.paths.home.to_string_lossy().to_string();
@@ -118,30 +139,72 @@ pub async fn open_data_folder(state: State<'_, AppState>, app: AppHandle) -> Res
 #[cfg(test)]
 mod audio_file_tests {
     use super::*;
+    use crate::db::{init, insert_history, HistoryItem, HistoryKind};
+
+    fn item(id: &str, audio_path: Option<String>) -> HistoryItem {
+        HistoryItem {
+            id: id.into(),
+            kind: HistoryKind::Stt,
+            created_at: 1,
+            title: "t".into(),
+            text: "x".into(),
+            audio_path,
+            duration_ms: None,
+            model_id: "m".into(),
+            voice_id: None,
+            language: None,
+            device: "cpu".into(),
+            processing_ms: 0,
+            favorite: false,
+            segments_json: None,
+        }
+    }
 
     #[test]
-    fn reads_only_files_inside_the_audio_folder() {
+    fn reads_only_audio_that_history_points_to() {
         let dir = tempfile::tempdir().unwrap();
         let paths = AppPaths::init_at(dir.path()).unwrap();
-        let audio = paths.audio.join("2026/09/example.wav");
-        std::fs::create_dir_all(audio.parent().unwrap()).unwrap();
-        std::fs::write(&audio, b"RIFF-test").unwrap();
+        init(&paths).unwrap();
 
-        assert_eq!(
-            read_owned_audio(&paths, "audio/2026/09/example.wav").unwrap(),
-            b"RIFF-test"
-        );
+        // A recording inside the audio folder, stored relative.
+        let owned = paths.audio.join("2026/09/example.wav");
+        std::fs::create_dir_all(owned.parent().unwrap()).unwrap();
+        std::fs::write(&owned, b"RIFF-owned").unwrap();
+        insert_history(&paths, &item("rec", Some("audio/2026/09/example.wav".into()))).unwrap();
 
-        let outside = dir.path().join("private.wav");
-        std::fs::write(&outside, b"private").unwrap();
-        assert!(matches!(
-            read_owned_audio(&paths, outside.to_str().unwrap()),
-            Err(AppError::Validation(_))
-        ));
-        assert!(read_owned_audio(&paths, "audio/../../private.wav").is_err());
-        assert!(matches!(
-            read_owned_audio(&paths, "audio/missing.wav"),
-            Err(AppError::NotFound(_))
-        ));
+        // An imported file elsewhere, stored absolute: playable because history points to it.
+        let imported = dir.path().join("Music").join("talk.mp3");
+        std::fs::create_dir_all(imported.parent().unwrap()).unwrap();
+        std::fs::write(&imported, b"ID3-imported").unwrap();
+        insert_history(&paths, &item("import", Some(imported.to_string_lossy().into_owned()))).unwrap();
+
+        insert_history(&paths, &item("silent", None)).unwrap();
+        insert_history(&paths, &item("gone", Some("audio/missing.wav".into()))).unwrap();
+        insert_history(&paths, &item("folder", Some("audio/2026".into()))).unwrap();
+
+        assert_eq!(read_history_audio_bytes(&paths, "rec", 1024).unwrap(), b"RIFF-owned");
+        assert_eq!(read_history_audio_bytes(&paths, "import", 1024).unwrap(), b"ID3-imported");
+        for id in ["silent", "gone", "folder", "no-such-id"] {
+            assert!(
+                matches!(read_history_audio_bytes(&paths, id, 1024), Err(AppError::NotFound(_))),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_audio_over_the_size_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = AppPaths::init_at(dir.path()).unwrap();
+        init(&paths).unwrap();
+        let big = paths.audio.join("big.wav");
+        std::fs::write(&big, [0u8; 100]).unwrap();
+        insert_history(&paths, &item("big", Some("audio/big.wav".into()))).unwrap();
+
+        assert_eq!(read_history_audio_bytes(&paths, "big", 100).unwrap().len(), 100);
+        match read_history_audio_bytes(&paths, "big", 99) {
+            Err(AppError::Validation(message)) => assert!(message.contains("too large to play")),
+            other => panic!("expected a validation error, got {:?}", other.map(|b| b.len())),
+        }
     }
 }

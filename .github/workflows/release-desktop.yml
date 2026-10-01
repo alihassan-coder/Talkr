@@ -2,14 +2,16 @@ name: Release Desktop
 
 # Push a tag like v0.1.0 to build installers on every platform and attach them
 # to a draft GitHub Release. Review the draft, then press Publish.
+# Tags only (no manual runs): the release name, the version check and the updater feed all come
+# from the tag.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
+# Read-only by default; only the job that uploads to the release can write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -19,11 +21,26 @@ jobs:
   # Installers are only built from code that passes every test (see ci.yml).
   ci:
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Fail in seconds, before hours of builds, when the tag and the version files disagree.
+  versions:
+    name: Versions match the tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: node scripts/check-versions.mjs
 
   build:
     name: ${{ matrix.name }}
-    needs: ci
+    needs: [versions, ci]
     runs-on: ${{ matrix.os }}
+    # tauri-action creates the draft release and uploads installers, signatures and latest.json.
+    permissions:
+      contents: write
     env:
       # Windows and Linux ship a Vulkan build of the engine next to the CPU one; fail the release
       # rather than silently shipping without it.
@@ -57,20 +74,23 @@ jobs:
             args: ''
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop/src-tauri -> target
           # Bump the suffix when a build setting the cache can't see changes (GGML_NATIVE and the
@@ -91,7 +111,7 @@ jobs:
       # The GPU engine (Windows, Linux) compiles whisper.cpp's Vulkan backend: headers and glslc.
       - name: Install the Vulkan SDK
         if: runner.os != 'macOS'
-        uses: jakoch/install-vulkan-sdk-action@v1
+        uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
         with:
           cache: true
 
@@ -115,9 +135,12 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then ls -la target/release/*.dll; fi
 
       - name: Build and upload installers
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (.sig files); the public key is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
@@ -137,6 +160,10 @@ jobs:
             Checksums are listed in `SHA256SUMS-*.txt`.
           releaseDraft: true
           prerelease: false
+          # latest.json is what installed copies poll (plugins.updater.endpoints); it only becomes
+          # visible at releases/latest/download once the draft is published.
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
       - name: Attach SHA-256 checksums

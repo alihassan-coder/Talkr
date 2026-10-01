@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ISSUES_URL, RELEASES_URL, REPO_URL, VERSION, downloadUrl, platforms } from '@/lib/releases'
+import { ISSUES_URL, MAC_CHOOSER, RELEASES_URL, REPO_URL, VERSION, archFromRenderer, downloadUrl, platforms } from '@/lib/releases'
 
 const desktopVersion = (JSON.parse(readFileSync(new URL('../../desktop/package.json', import.meta.url), 'utf8')) as {
   version: string
@@ -61,19 +61,68 @@ describe('detectDownload', () => {
   it('picks the Windows installer', async () => {
     const d = await detectWith('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
     expect(d?.label).toBe('Windows')
-    expect(d?.file.name).toBe(`Talkr_${VERSION}_x64-setup.exe`)
+    expect(d?.file?.name).toBe(`Talkr_${VERSION}_x64-setup.exe`)
+    expect(d?.href).toBe(downloadUrl(`Talkr_${VERSION}_x64-setup.exe`))
   })
 
-  it('picks the Apple Silicon disk image on macOS', async () => {
-    const d = await detectWith('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)')
+  const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)'
+
+  /** A Mac whose browser answers the architecture client hint with `architecture`. */
+  const detectMac = async (architecture: string | Promise<never>) => {
+    vi.resetModules()
+    const getHighEntropyValues = vi.fn(() =>
+      typeof architecture === 'string' ? Promise.resolve({ architecture }) : architecture,
+    )
+    vi.stubGlobal('navigator', { userAgent: MAC_UA, userAgentData: { platform: 'macOS', getHighEntropyValues } })
+    const { detectDownload, subscribeDownload } = await import('@/lib/releases')
+    const changed = vi.fn()
+    subscribeDownload(changed)
+    const first = detectDownload()
+    await new Promise((r) => setTimeout(r, 0))
+    return { first, latest: detectDownload(), changed, getHighEntropyValues }
+  }
+
+  it('sends a Mac of unknown architecture to the chooser, not a file', async () => {
+    const d = await detectWith(MAC_UA)
     expect(d?.label).toBe('macOS')
-    expect(d?.file.name).toBe(`Talkr_${VERSION}_aarch64.dmg`)
+    expect(d?.file).toBeNull()
+    expect(d?.href).toBe(MAC_CHOOSER)
+  })
+
+  it('picks the Apple Silicon disk image when the browser reports arm', async () => {
+    const { first, latest, changed, getHighEntropyValues } = await detectMac('arm')
+    expect(getHighEntropyValues).toHaveBeenCalledWith(['architecture'])
+    expect(first?.href).toBe(MAC_CHOOSER)
+    expect(latest?.file?.name).toBe(`Talkr_${VERSION}_aarch64.dmg`)
+    expect(latest?.href).toBe(downloadUrl(`Talkr_${VERSION}_aarch64.dmg`))
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it('picks the Intel disk image when the browser reports x86', async () => {
+    const { latest } = await detectMac('x86')
+    expect(latest?.file?.name).toBe(`Talkr_${VERSION}_x64.dmg`)
+  })
+
+  it('keeps the chooser when the architecture stays unknown', async () => {
+    const { latest, changed } = await detectMac(Promise.reject(new Error('denied')))
+    expect(latest?.href).toBe(MAC_CHOOSER)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('reads the architecture from the GPU name as a fallback', () => {
+    expect(archFromRenderer('ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)')).toBe('arm')
+    expect(archFromRenderer('Apple M1')).toBe('arm')
+    expect(archFromRenderer('ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 655, OpenGL 4.1)')).toBe('intel')
+    expect(archFromRenderer('AMD Radeon Pro 5500M OpenGL Engine')).toBe('intel')
+    expect(archFromRenderer('Apple GPU')).toBeNull()
+    expect(archFromRenderer('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))')).toBeNull()
+    expect(archFromRenderer(null)).toBeNull()
   })
 
   it('picks the AppImage on Linux, using client hints when present', async () => {
     const d = await detectWith('Mozilla/5.0 (X11)', 'Linux')
     expect(d?.label).toBe('Linux')
-    expect(d?.file.name).toBe(`Talkr_${VERSION}_amd64.AppImage`)
+    expect(d?.file?.name).toBe(`Talkr_${VERSION}_amd64.AppImage`)
   })
 
   it('returns null on phones and unknown systems', async () => {

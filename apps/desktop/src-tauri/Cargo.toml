@@ -1,6 +1,6 @@
 [package]
 name = "talkr"
-version = "0.1.4"
+version = "0.1.5"
 description = "Free, private, offline speech tools"
 authors = ["Talkr Contributors"]
 license = "MIT"
@@ -31,6 +31,9 @@ tauri = { version = "2.0", features = [] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-opener = "2.0"
 tauri-plugin-log = "2.0"
+# Keep major.minor equal to @tauri-apps/plugin-updater and @tauri-apps/plugin-process in package.json.
+tauri-plugin-updater = "2.13"
+tauri-plugin-process = "2.4"
 log = { workspace = true }
 talkr-protocol = { path = "protocol" }
 

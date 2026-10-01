@@ -139,8 +139,10 @@ impl CatalogModel {
         paths.model_dir(self.kind.as_str(), &self.id)
     }
 
+    /// Installed means the manifest is there and readable. A manifest torn by a crash or power
+    /// loss mid-install does not count, so the model can simply be downloaded again.
     pub fn is_installed(&self, paths: &AppPaths) -> bool {
-        self.dir(paths).join("manifest.json").exists()
+        self.get_installed_manifest(paths).is_some()
     }
 
     pub fn get_installed_manifest(&self, paths: &AppPaths) -> Option<ModelManifest> {

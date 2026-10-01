@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
 const sans = Geist({
@@ -15,7 +16,8 @@ const mono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://talkr.app'),
+  metadataBase: new URL(SITE_URL),
+  alternates: { canonical: '/' },
   title: {
     default: 'Talkr: speech tools that never phone home',
     template: '%s · Talkr',

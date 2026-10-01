@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import { History, LoaderCircle, Mic, Search, SearchX, Star, Volume2, X } from 'lucide-react'
+import { History, LoaderCircle, Mic, RotateCw, Search, SearchX, Star, TriangleAlert, Volume2, X } from 'lucide-react'
 import { historyList, historyToggleFavorite, isTauri } from '@/lib/api'
 import type { HistoryItem, HistoryKind } from '@/lib/types'
 import { Button, Card, EmptyState, IconButton, Kbd, Kicker, PageHeader, Segmented } from '@/components/ui'
 import { cx } from '@/lib/cx'
+import { errorText } from '@/lib/errors'
 import { toastError } from '@/stores/toast'
 import { HistoryDetail } from '@/features/history/HistoryDetail'
 import { filterSample } from '@/features/history/sample'
 import { formatDuration, groupByDay, relativeTime } from '@/features/history/utils'
 
 type KindFilter = 'all' | HistoryKind
+
+/** The loaded list and the filters (`key`) it belongs to. */
+type Page = { key: string; items: HistoryItem[]; cursor: number | null; error: string | null }
 
 const kindOptions: { value: KindFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -23,11 +27,22 @@ export function HistoryPage() {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<KindFilter>('all')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const [items, setItems] = useState<HistoryItem[]>([])
-  const [cursor, setCursor] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [page, setPage] = useState<Page | null>(null)
+  const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Bumped for every first-page request, so a slow "Load more" for older filters is dropped.
+  const generation = useRef(0)
+  const detailRef = useRef<HTMLElement>(null)
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>())
+
+  const filterKey = JSON.stringify([query, kind, favoritesOnly, reload])
+  // Until the first page for the current filters arrives, nothing older is shown.
+  const loading = page?.key !== filterKey
+  const items = page && !loading ? page.items : []
+  const cursor = page && !loading ? page.cursor : null
+  const loadError = page && !loading ? page.error : null
+  const loadingMore = loadingMoreKey === filterKey
 
   const filtered = query.trim() !== '' || kind !== 'all' || favoritesOnly
   const selected = items.find((i) => i.id === selectedId) ?? null
@@ -41,26 +56,39 @@ export function HistoryPage() {
   // First page whenever the filters change.
   useEffect(() => {
     let cancelled = false
+    generation.current += 1
+    const key = filterKey
     const kindParam = kind === 'all' ? null : kind
     const load = isTauri()
       ? historyList({ query, kind: kindParam, favoritesOnly })
       : Promise.resolve({ items: filterSample(query, kindParam, favoritesOnly), nextCursor: null })
     load
       .then((res) => {
-        if (cancelled) return
-        setItems(res.items)
-        setCursor(res.nextCursor)
+        if (!cancelled) setPage({ key, items: res.items, cursor: res.nextCursor, error: null })
       })
       .catch((e: unknown) => {
-        if (!cancelled) toastError(e)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setPage({ key, items: [], cursor: null, error: errorText(e) })
       })
     return () => {
       cancelled = true
     }
-  }, [query, kind, favoritesOnly])
+  }, [query, kind, favoritesOnly, filterKey])
+
+  // A newly selected item: move focus to its details and make sure they are on screen
+  // (below the lg breakpoint the panel sits under the list).
+  useEffect(() => {
+    if (!selectedId) return
+    const panel = detailRef.current
+    if (!panel) return
+    panel.focus({ preventScroll: true })
+    panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedId])
+
+  /** Close the details and give focus back to the row that opened them. */
+  const closeDetail = () => {
+    if (selectedId) rowRefs.current.get(selectedId)?.focus()
+    setSelectedId(null)
+  }
 
   // Ctrl+F focuses search, Esc clears it.
   useEffect(() => {
@@ -76,7 +104,10 @@ export function HistoryPage() {
         } else if (document.activeElement === searchRef.current) {
           searchRef.current?.blur()
         } else {
-          setSelectedId(null)
+          setSelectedId((id) => {
+            if (id) rowRefs.current.get(id)?.focus()
+            return null
+          })
         }
       }
     }
@@ -85,18 +116,32 @@ export function HistoryPage() {
   }, [])
 
   const loadMore = async () => {
-    if (cursor === null) return
-    setLoadingMore(true)
+    if (cursor === null || loadingMore) return
+    const key = filterKey
+    const gen = generation.current
+    setLoadingMoreKey(key)
     try {
       const res = await historyList({ cursor, query, kind: kind === 'all' ? null : kind, favoritesOnly })
-      setItems((prev) => [...prev, ...res.items.filter((n) => !prev.some((p) => p.id === n.id))])
-      setCursor(res.nextCursor)
+      // The filters changed meanwhile: this page belongs to another list.
+      if (gen !== generation.current) return
+      setPage((prev) =>
+        prev && prev.key === key
+          ? {
+              ...prev,
+              items: [...prev.items, ...res.items.filter((n) => !prev.items.some((p) => p.id === n.id))],
+              cursor: res.nextCursor,
+            }
+          : prev,
+      )
     } catch (e) {
-      toastError(e)
+      if (gen === generation.current) toastError(e)
     } finally {
-      setLoadingMore(false)
+      setLoadingMoreKey((k) => (k === key ? null : k))
     }
   }
+
+  const setItems = (update: (prev: HistoryItem[]) => HistoryItem[]) =>
+    setPage((prev) => (prev ? { ...prev, items: update(prev.items) } : prev))
 
   const replaceItem = (next: HistoryItem) => setItems((prev) => prev.map((i) => (i.id === next.id ? next : i)))
 
@@ -115,6 +160,7 @@ export function HistoryPage() {
   const removeItem = (id: string) => {
     setItems((prev) => prev.filter((i) => i.id !== id))
     setSelectedId(null)
+    searchRef.current?.focus()
   }
 
   const clearFilters = () => {
@@ -180,9 +226,24 @@ export function HistoryPage() {
       ) : null}
 
       {loading ? (
-        <div className="grid place-items-center py-20 text-subtle">
+        <div role="status" aria-label="Loading history" className="grid place-items-center py-20 text-subtle">
           <LoaderCircle className="size-4 animate-spin" strokeWidth={2} />
         </div>
+      ) : loadError ? (
+        <EmptyState
+          icon={<TriangleAlert className="size-4.5" strokeWidth={1.75} />}
+          title="Could not load history"
+          description={loadError}
+          action={
+            <Button
+              size="sm"
+              icon={<RotateCw className="size-3.5" strokeWidth={2} />}
+              onClick={() => setReload((n) => n + 1)}
+            >
+              Try again
+            </Button>
+          }
+        />
       ) : items.length === 0 ? (
         filtered ? (
           <EmptyState
@@ -215,6 +276,10 @@ export function HistoryPage() {
                         key={item.id}
                         item={item}
                         selected={item.id === selectedId}
+                        buttonRef={(el) => {
+                          if (el) rowRefs.current.set(item.id, el)
+                          else rowRefs.current.delete(item.id)
+                        }}
                         onSelect={() => setSelectedId(item.id === selectedId ? null : item.id)}
                         onToggleFavorite={() => void toggleFavorite(item)}
                       />
@@ -233,11 +298,16 @@ export function HistoryPage() {
           </div>
 
           {selected ? (
-            <aside className="min-w-0 lg:sticky lg:top-0">
+            <aside
+              ref={detailRef}
+              tabIndex={-1}
+              aria-label="Item details"
+              className="min-w-0 scroll-mt-6 rounded-2xl outline-none lg:sticky lg:top-0"
+            >
               <HistoryDetail
                 key={selected.id}
                 item={selected}
-                onClose={() => setSelectedId(null)}
+                onClose={closeDetail}
                 onChange={replaceItem}
                 onDeleted={removeItem}
               />
@@ -252,11 +322,13 @@ export function HistoryPage() {
 function HistoryRow({
   item,
   selected,
+  buttonRef,
   onSelect,
   onToggleFavorite,
 }: {
   item: HistoryItem
   selected: boolean
+  buttonRef: (el: HTMLButtonElement | null) => void
   onSelect: () => void
   onToggleFavorite: () => void
 }) {
@@ -270,6 +342,7 @@ function HistoryRow({
       )}
     >
       <button
+        ref={buttonRef}
         type="button"
         onClick={onSelect}
         aria-current={selected || undefined}
@@ -284,9 +357,13 @@ function HistoryRow({
           {item.kind === 'tts' ? <Volume2 className="size-3.5" strokeWidth={2} /> : <Mic className="size-3.5" strokeWidth={2} />}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="line-clamp-1 text-[13.5px] font-medium tracking-[-0.005em] text-fg">{item.title}</span>
+          <span dir="auto" className="line-clamp-1 text-[13.5px] font-medium tracking-[-0.005em] text-fg">
+            {item.title}
+          </span>
           {snippet && snippet !== item.title ? (
-            <span className="line-clamp-1 text-[13px] text-muted">{snippet}</span>
+            <span dir="auto" className="line-clamp-1 text-[13px] text-muted">
+              {snippet}
+            </span>
           ) : null}
           <span className="mt-0.5 line-clamp-1 font-mono text-[11px] text-subtle">{meta.join(' · ')}</span>
         </span>

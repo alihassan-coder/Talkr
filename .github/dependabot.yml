@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; Dependabot bumps the SHA and the version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+    # Tauri plugins must move together with their @tauri-apps npm packages (same major.minor),
+    # or the release breaks: update them by hand, in one PR with package.json.
+    ignore:
+      - dependency-name: 'tauri-plugin-*'
+        update-types: [version-update:semver-minor]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '@tauri-apps/plugin-*'
+        update-types: [version-update:semver-minor]

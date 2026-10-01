@@ -1,6 +1,6 @@
 // Tiny static server for the `next build` export in ./out, resolving clean URLs the way
 // Vercel does: /download -> download.html or download/index.html. Used by playwright.config.ts.
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,6 +25,12 @@ if (!existsSync(join(root, 'index.html'))) {
   console.error(`No static export in ${root}. Run \`pnpm --filter web build\` first.`)
   process.exit(1)
 }
+
+// The same security headers Vercel sends (repo-root vercel.json), so e2e catches a CSP that breaks the site.
+const vercel = JSON.parse(readFileSync(new URL('../../../vercel.json', import.meta.url), 'utf8'))
+const securityHeaders = Object.fromEntries(
+  (vercel.headers ?? []).filter((h) => h.source === '/(.*)').flatMap((h) => h.headers.map((x) => [x.key, x.value])),
+)
 
 const isFile = (path) => existsSync(path) && statSync(path).isFile()
 
@@ -52,10 +58,10 @@ createServer((req, res) => {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost')
   const file = resolveFile(pathname)
   if (!file) {
-    res.writeHead(404, { 'content-type': TYPES['.html'] })
+    res.writeHead(404, { ...securityHeaders, 'content-type': TYPES['.html'] })
     createReadStream(join(root, '404.html')).pipe(res)
     return
   }
-  res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })
+  res.writeHead(200, { ...securityHeaders, 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })
   createReadStream(file).pipe(res)
 }).listen(port, '127.0.0.1', () => console.log(`Serving ${root} on http://127.0.0.1:${port}`))

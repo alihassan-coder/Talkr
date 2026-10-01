@@ -100,7 +100,9 @@ export function HistoryDetail({
           {item.kind === 'tts' ? <Volume2 className="size-3.5" strokeWidth={2} /> : <Mic className="size-3.5" strokeWidth={2} />}
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="line-clamp-2 text-[14px] font-medium tracking-[-0.01em]">{item.title}</h2>
+          <h2 dir="auto" className="line-clamp-2 text-[14px] font-medium tracking-[-0.01em]">
+            {item.title}
+          </h2>
           <p className="mt-0.5 font-mono text-[11px] text-subtle">
             {created.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} ·{' '}
             {created.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
@@ -115,6 +117,7 @@ export function HistoryDetail({
         {item.audioPath ? (
           <AudioPlayer
             key={item.id}
+            id={item.id}
             path={item.audioPath}
             seed={item.id}
             fallbackDurationMs={item.durationMs}
@@ -126,13 +129,16 @@ export function HistoryDetail({
             {segments.map((seg, i) => (
               <p key={i} className="grid grid-cols-[3.25rem_1fr] gap-2">
                 <span className="pt-px font-mono text-[11px] tabular-nums text-subtle">{formatClock(seg.startMs)}</span>
-                <span className="text-fg">{seg.text.trim()}</span>
+                <span dir="auto" className="text-fg">
+                  {seg.text.trim()}
+                </span>
               </p>
             ))}
           </div>
         ) : (
           <p
             data-selectable
+            dir="auto"
             className="max-h-80 overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-relaxed text-fg"
           >
             {item.text}
