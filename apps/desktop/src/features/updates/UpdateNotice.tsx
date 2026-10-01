@@ -1,107 +1,90 @@
 import { useEffect, useState } from 'react'
-import type { Update } from '@tauri-apps/plugin-updater'
+import { ArrowUpCircle, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui'
-import { Notice } from '@/components/Notice'
-import { isTauri, stopEngine } from '@/lib/api'
-
-type State =
-  | { phase: 'idle' }
-  | { phase: 'available'; update: Update }
-  | { phase: 'installing'; update: Update; downloaded: number; total?: number }
-  | { phase: 'failed'; update: Update; message: string }
-
-/** Update problems never interrupt the user: they go to the log file and the banner stays away. */
-async function logWarning(message: string) {
-  try {
-    const { warn } = await import('@tauri-apps/plugin-log')
-    await warn(message)
-  } catch {
-    console.warn(message)
-  }
-}
+import { cx } from '@/lib/cx'
+import { canCheckForUpdates, shouldOffer, startUpdateChecks, useUpdates } from '@/stores/updates'
 
 /**
- * Only the packaged app checks: not the browser preview (no Tauri), not `tauri dev` and not tests
- * (both run a development build).
+ * Starts the background update checks and, when a newer Talkr is out, shows a banner at the top
+ * of the page (in the flow, so it never covers a page's own controls). The release notes fold
+ * out; "Later" hides it until the next launch, "Skip this version" for good.
  */
-const shouldCheck = () => isTauri() && import.meta.env.PROD
-
-/**
- * Checks GitHub Releases once at startup (tauri-plugin-updater verifies the signature) and offers a
- * small banner when a newer Talkr is out.
- */
-export function UpdateNotice({ enabled = shouldCheck() }: { enabled?: boolean }) {
-  const [state, setState] = useState<State>({ phase: 'idle' })
-  const [dismissed, setDismissed] = useState(false)
+export function UpdateNotice({ enabled = canCheckForUpdates() }: { enabled?: boolean }) {
+  const state = useUpdates()
+  const [notesOpen, setNotesOpen] = useState(false)
 
   useEffect(() => {
     if (!enabled) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const { check } = await import('@tauri-apps/plugin-updater')
-        const update = await check()
-        if (!cancelled && update) setState({ phase: 'available', update })
-      } catch (e) {
-        void logWarning(`Update check failed: ${String(e)}`)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
+    return startUpdateChecks()
   }, [enabled])
 
-  if (state.phase === 'idle' || dismissed) return null
-  const { update } = state
-
-  const install = async () => {
-    let downloaded = 0
-    let total: number | undefined
-    setState({ phase: 'installing', update, downloaded })
-    try {
-      await update.download((event) => {
-        if (event.event === 'Started') total = event.data.contentLength
-        else if (event.event === 'Progress') downloaded += event.data.chunkLength
-        setState({ phase: 'installing', update, downloaded, total })
-      })
-      // The Windows installer has to replace the engine executable, which is locked while it runs.
-      await stopEngine()
-      await update.install()
-      // Windows quits for the installer on its own; macOS and Linux need the relaunch.
-      const { relaunch } = await import('@tauri-apps/plugin-process')
-      await relaunch()
-    } catch (e) {
-      void logWarning(`Update to ${update.version} failed: ${String(e)}`)
-      setState({ phase: 'failed', update, message: String(e) })
-    }
-  }
-
-  const installing = state.phase === 'installing'
-  const percent =
-    installing && state.total ? Math.min(100, Math.round((state.downloaded / state.total) * 100)) : undefined
+  if (!shouldOffer(state) || !state.update) return null
+  const { update, phase } = state
+  const busy = phase === 'downloading' || phase === 'installing'
+  const percent = state.total ? Math.min(100, Math.round((state.downloaded / state.total) * 100)) : undefined
+  const notes = update.body?.trim()
 
   return (
-    <div className="fixed right-5 top-5 z-40 w-80">
-      <Notice
-        tone={state.phase === 'failed' ? 'error' : 'info'}
-        title={`Talkr ${update.version} is available`}
-        onDismiss={installing ? undefined : () => setDismissed(true)}
-        action={
-          <Button size="sm" variant="primary" loading={installing} onClick={() => void install()}>
-            {installing
+    <section
+      role="status"
+      aria-label="Update available"
+      className="animate-rise overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-card)]"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3.5">
+        <ArrowUpCircle aria-hidden="true" className="size-5 shrink-0 text-accent" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-medium tracking-[-0.005em]">Talkr {update.version} is available</p>
+          <p className="text-[12.5px] text-muted">
+            {phase === 'failed'
+              ? state.error
+              : phase === 'installing'
+                ? 'Installing. Talkr will restart in a moment.'
+                : `You have ${update.currentVersion}. Talkr restarts to finish the update; your history and models stay.`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {notes ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={notesOpen}
+              icon={<ChevronDown className={cx('size-3.5 transition-transform', notesOpen && 'rotate-180')} strokeWidth={2} />}
+              onClick={() => setNotesOpen((o) => !o)}
+            >
+              What&apos;s new
+            </Button>
+          ) : null}
+          {busy ? null : (
+            <>
+              <Button size="sm" variant="ghost" onClick={state.dismiss}>
+                Later
+              </Button>
+              <Button size="sm" variant="ghost" onClick={state.skip}>
+                Skip this version
+              </Button>
+            </>
+          )}
+          <Button size="sm" variant="primary" loading={busy} onClick={() => void state.install()}>
+            {phase === 'downloading'
               ? percent === undefined
                 ? 'Downloading…'
                 : `Downloading… ${percent}%`
-              : state.phase === 'failed'
-                ? 'Try again'
-                : 'Install and restart'}
+              : phase === 'installing'
+                ? 'Installing…'
+                : phase === 'failed'
+                  ? 'Try again'
+                  : 'Install and restart'}
           </Button>
-        }
-      >
-        {state.phase === 'failed'
-          ? 'The update could not be installed. Try again, or download it from the website.'
-          : 'Talkr will restart to finish the update.'}
-      </Notice>
-    </div>
+        </div>
+      </div>
+      {notes && notesOpen ? (
+        <div
+          data-selectable
+          className="max-h-56 overflow-y-auto whitespace-pre-wrap border-t border-line px-5 py-3.5 text-[12.5px] leading-relaxed text-muted"
+        >
+          {notes}
+        </div>
+      ) : null}
+    </section>
   )
 }

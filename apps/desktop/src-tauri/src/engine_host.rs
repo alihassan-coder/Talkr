@@ -433,6 +433,12 @@ impl EngineHost {
     fn run_with_fallback(&self, id: &str, make_op: &dyn Fn(bool) -> Op, gpu: bool, progress: &dyn Fn(f32)) -> Answer {
         let gpu = gpu && self.gpu_available();
         match self.run_once(id, make_op, gpu, progress) {
+            // The system ran out of memory (the OOM killer, or Windows' commit limit): that is no
+            // fault of the GPU, and the CPU would need more memory still. Say so and keep the GPU.
+            Err(AppError::EngineDied(exit)) if gpu && is_out_of_memory(exit) => {
+                log::warn!("GPU engine ran out of memory ({}); keeping the GPU enabled", describe(exit));
+                Err(self.explain(AppError::EngineDied(exit)))
+            }
             Err(AppError::EngineDied(exit)) if gpu => {
                 log::warn!("GPU engine died ({}); retrying on the CPU and disabling the GPU", describe(exit));
                 self.mark_gpu_failed();
@@ -561,6 +567,20 @@ impl EngineHost {
     pub fn shutdown(&self) {
         let worker = lock(&self.worker).take();
         drop(worker);
+    }
+
+    /// Stop the GPU build if it is running and idle, so a switch to the CPU frees its GPU context
+    /// and video memory now rather than at the idle timeout (the GPU build would otherwise keep
+    /// serving CPU jobs). Returns whether it was stopped.
+    pub fn stop_gpu_engine_if_idle(&self) -> bool {
+        let mut slot = lock(&self.worker);
+        let gpu = slot.as_ref().is_some_and(|w| w.variant == Variant::Gpu);
+        if gpu && self.busy.load(Ordering::SeqCst) == 0 {
+            log::info!("stopping the GPU engine: speech to text now runs on the CPU");
+            *slot = None;
+            return true;
+        }
+        false
     }
 
     /// Stop the engine if nothing has used it for `idle`. Returns whether it was stopped.
@@ -1056,6 +1076,33 @@ mod tests {
         assert!(again.gpu_failed());
         again.reset_gpu();
         assert!(!again.gpu_failed() && again.gpu_available());
+    }
+
+    #[test]
+    fn switching_to_the_cpu_stops_an_idle_gpu_engine() {
+        let (host, launches, _) = make_host(FakeLauncher::new(Script::Healthy, Some(Script::Healthy)));
+        assert!(!host.stop_gpu_engine_if_idle(), "nothing running yet");
+        host.run("j1", &transcribe, true, &|_| {}).unwrap();
+        assert!(host.stop_gpu_engine_if_idle());
+        host.run("j2", &transcribe, false, &|_| {}).unwrap();
+        assert_eq!(*lock(&launches), vec![Variant::Gpu, Variant::Cpu]);
+        // The CPU build is left alone.
+        assert!(!host.stop_gpu_engine_if_idle());
+    }
+
+    #[test]
+    fn running_out_of_memory_on_the_gpu_does_not_disable_it() {
+        let marker = tempfile::NamedTempFile::new().unwrap();
+        let launcher = FakeLauncher::new(Script::Healthy, Some(Script::DieOnTranscribe(Exit::Signal(9))));
+        let launches = launcher.launches.clone();
+        let host = EngineHost::new(Box::new(launcher), Some(marker.path().to_path_buf()));
+
+        let err = host.run("j1", &transcribe, true, &|_| {}).unwrap_err().to_string();
+        assert!(err.contains("ran out of memory"), "{err}");
+        // No CPU retry (it needs more memory still), and the GPU stays on, now and next launch.
+        assert_eq!(*lock(&launches), vec![Variant::Gpu]);
+        assert!(!host.gpu_failed() && host.gpu_available());
+        assert_eq!(std::fs::read_to_string(marker.path()).unwrap(), "");
     }
 
     #[test]

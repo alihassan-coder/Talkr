@@ -32,6 +32,7 @@ import { toast, toastError } from '@/stores/toast'
 import { Row, Section, Switch } from '@/features/settings/controls'
 import { AppearanceSection } from '@/features/settings/Appearance'
 import { ComputeSection } from '@/features/settings/Compute'
+import { UpdatesSection } from '@/features/settings/Updates'
 import { formatBytes } from '@/features/history/utils'
 
 const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
@@ -105,8 +106,8 @@ export function SettingsPage() {
   const [models, setModels] = useState<InstalledModel[]>([])
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [modelsAttempt, setModelsAttempt] = useState(0)
-  const [voices, setVoices] = useState<Voice[]>([])
-  const [voicesError, setVoicesError] = useState<string | null>(null)
+  // Tagged with their model: after a model change the old list must not be offered.
+  const [loadedVoices, setVoices] = useState<{ model: string; list: Voice[]; error: string | null } | null>(null)
   const [usage, setUsage] = useState<StorageUsage | null>(null)
   const [usageError, setUsageError] = useState<string | null>(null)
   const [paths, setPaths] = useState<AppPaths | null>(null)
@@ -191,20 +192,20 @@ export function SettingsPage() {
     if (!isTauri() || !ttsModel) return
     let cancelled = false
     listVoices({ modelId: ttsModel })
-      .then((v) => {
-        if (cancelled) return
-        setVoices(v)
-        setVoicesError(null)
+      .then((list) => {
+        if (!cancelled) setVoices({ model: ttsModel, list, error: null })
       })
       .catch((e: unknown) => {
-        if (cancelled) return
-        setVoices([])
-        setVoicesError(errorText(e))
+        if (!cancelled) setVoices({ model: ttsModel, list: [], error: errorText(e) })
       })
     return () => {
       cancelled = true
     }
   }, [ttsModel])
+
+  const voiceState = loadedVoices?.model === ttsModel ? loadedVoices : null
+  const voices = voiceState?.list ?? []
+  const voicesError = voiceState?.error ?? null
 
   useEffect(() => {
     if (status !== 'saved') return
@@ -226,7 +227,10 @@ export function SettingsPage() {
     try {
       const saved = await updateSettings({ settings: patch })
       if (seq === saveSeq.current) {
-        setSettings(saved)
+        // A speed change still waiting for its debounce is newer than what was just saved.
+        setSettings((cur) =>
+          rateTimer.current && cur ? { ...saved, speechRate: cur.speechRate } : saved,
+        )
         setStatus('saved')
       }
       return true
@@ -250,7 +254,10 @@ export function SettingsPage() {
     const previous = settings
     setSettings((current) => (current ? { ...current, speechRate } : current))
     if (rateTimer.current) clearTimeout(rateTimer.current)
-    rateTimer.current = setTimeout(() => void persist({ speechRate }, previous), 350)
+    rateTimer.current = setTimeout(() => {
+      rateTimer.current = null
+      void persist({ speechRate }, previous)
+    }, 350)
   }
 
   /** A new speech model: keep the default voice only if the new model has it. */
@@ -564,6 +571,8 @@ export function SettingsPage() {
           </Button>
         </Row>
       </Section>
+
+      <UpdatesSection version={version} />
 
       <Section title="About">
         <Row label="Talkr" description="Free and open source under MIT.">

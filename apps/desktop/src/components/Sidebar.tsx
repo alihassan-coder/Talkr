@@ -4,7 +4,9 @@ import { Boxes, History, Mic, PanelLeftClose, PanelLeftOpen, Settings, Volume2 }
 import { LogoMark } from '@/components/Logo'
 import { Kbd } from '@/components/ui'
 import { cx } from '@/lib/cx'
+import { modKey } from '@/lib/platform'
 import { useUi } from '@/stores/ui'
+import { shouldOffer, useUpdates } from '@/stores/updates'
 
 const primary = [
   { to: '/speak', label: 'Speak', icon: Volume2, key: '1' },
@@ -35,12 +37,15 @@ function Item({
   label,
   shortcut,
   collapsed,
+  badge,
 }: {
   to: string
   icon: typeof Mic
   label: string
   shortcut?: string
   collapsed: boolean
+  /** A dot on the icon, named for screen readers, e.g. "Update available". */
+  badge?: string
 }) {
   return (
     <NavLink
@@ -58,7 +63,14 @@ function Item({
         aria-hidden="true"
         className="absolute inset-y-2.5 left-0 w-[3px] scale-y-0 rounded-r-full bg-accent transition-transform duration-250 ease-out-quint group-aria-[current=page]/tip:scale-y-100"
       />
-      <Icon className="size-4 shrink-0 group-aria-[current=page]/tip:text-accent" strokeWidth={1.75} />
+      <span className="relative shrink-0">
+        <Icon className="size-4 group-aria-[current=page]/tip:text-accent" strokeWidth={1.75} />
+        {badge ? (
+          <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-panel">
+            <span className="sr-only">{badge}</span>
+          </span>
+        ) : null}
+      </span>
       {/* Clipped rather than reflowed while the width animates, so nothing wraps mid-transition. */}
       <span
         className={cx(
@@ -70,10 +82,12 @@ function Item({
       </span>
       {shortcut && !collapsed ? (
         <span className="shrink-0 whitespace-nowrap opacity-0 transition-opacity group-hover/tip:opacity-100">
-          <Kbd>Ctrl {shortcut}</Kbd>
+          <Kbd>
+            {modKey()} {shortcut}
+          </Kbd>
         </span>
       ) : null}
-      {collapsed ? <Tip label={label} shortcut={shortcut ? `Ctrl ${shortcut}` : undefined} /> : null}
+      {collapsed ? <Tip label={badge ? `${label} · ${badge}` : label} shortcut={shortcut ? `${modKey()} ${shortcut}` : undefined} /> : null}
     </NavLink>
   )
 }
@@ -81,6 +95,7 @@ function Item({
 export function Sidebar({ footer }: { footer?: ReactNode }) {
   const collapsed = useUi((s) => s.sidebarCollapsed)
   const toggle = useUi((s) => s.toggleSidebar)
+  const updateReady = useUpdates((s) => !!s.update && s.phase !== 'current' && shouldOffer({ ...s, dismissedVersion: null }))
 
   return (
     <aside
@@ -112,7 +127,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
             <span className="opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-visible/tip:opacity-100">
               <PanelLeftOpen className="size-4" strokeWidth={1.75} />
             </span>
-            <Tip label="Expand sidebar" shortcut="Ctrl B" />
+            <Tip label="Expand sidebar" shortcut={`${modKey()} B`} />
           </button>
         ) : (
           <button
@@ -123,7 +138,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
             className="group/tip absolute right-0 grid size-8 place-items-center rounded-lg text-subtle transition-colors duration-200 hover:bg-fg/[0.06] hover:text-fg"
           >
             <PanelLeftClose className="size-4" strokeWidth={1.75} />
-            <Tip label="Collapse sidebar" shortcut="Ctrl B" />
+            <Tip label="Collapse sidebar" shortcut={`${modKey()} B`} />
           </button>
         )}
       </div>
@@ -148,7 +163,14 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
             <div className="w-50">{footer}</div>
           </div>
         ) : null}
-        <Item to="/settings" icon={Settings} label="Settings" shortcut="," collapsed={collapsed} />
+        <Item
+          to="/settings"
+          icon={Settings}
+          label="Settings"
+          shortcut=","
+          collapsed={collapsed}
+          badge={updateReady ? 'Update available' : undefined}
+        />
       </div>
     </aside>
   )

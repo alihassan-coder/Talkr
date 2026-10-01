@@ -1,0 +1,129 @@
+name: Test build
+
+# Installers for testing, built in the cloud instead of on your computer. Start it from the
+# Actions tab ("Test build" > "Run workflow"), pick the platforms, and download the installers
+# from the run's Artifacts (kept for 7 days). Nothing is released, signed or published.
+#
+# The steps mirror release-desktop.yml's build job, so a green test build means the release
+# will build too. Keep the two in step.
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build
+        type: choice
+        default: all
+        options: [all, windows, macos, linux]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.ref }}-${{ inputs.platforms }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Pick platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          all='[
+            {"name":"Windows x64","platform":"windows","os":"windows-latest","target":"x86_64-pc-windows-msvc","args":""},
+            {"name":"macOS Apple Silicon","platform":"macos","os":"macos-latest","target":"aarch64-apple-darwin","args":"--target aarch64-apple-darwin"},
+            {"name":"macOS Intel","platform":"macos","os":"macos-latest","target":"x86_64-apple-darwin","args":"--target x86_64-apple-darwin"},
+            {"name":"Linux x64","platform":"linux","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","args":""}
+          ]'
+          echo "matrix=$(jq -c --arg p "$PLATFORMS" 'map(select($p == "all" or .platform == $p))' <<< "$all")" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.name }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    env:
+      TALKR_REQUIRE_GPU: ${{ startsWith(matrix.os, 'macos') && '0' || '1' }}
+      # See release-desktop.yml: never tune whisper.cpp for the runner's CPU, except Apple Silicon.
+      GGML_NATIVE: ${{ matrix.target == 'aarch64-apple-darwin' && 'ON' || 'OFF' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.98.1
+          targets: ${{ matrix.target }}
+
+      # Shares the release builds' cache, so a test build is mostly incremental.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}-engine-v3
+          save-if: false
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libudev-dev libasound2-dev patchelf cmake clang libclang-dev libvulkan-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
+      - name: Install the Vulkan SDK
+        if: runner.os != 'macOS'
+        uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # See release-desktop.yml for why this runs on its own first.
+      - name: Stage sherpa-onnx libraries
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          CARGO_ARGS: ${{ matrix.args }}
+        run: |
+          cargo clean --release -p sherpa-rs-sys $CARGO_ARGS
+          cargo build --release -p sherpa-rs-sys $CARGO_ARGS
+
+      # No tag and no release: tauri-action only builds. tauri.preview.conf.json turns the signed
+      # updater artifacts off, since test builds have no access to the signing key.
+      - name: Build installers
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.args }} --config src-tauri/tauri.preview.conf.json
+
+      - name: Upload installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: talkr-${{ matrix.target }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/**/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/**/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm

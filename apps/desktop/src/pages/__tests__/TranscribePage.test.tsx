@@ -28,7 +28,7 @@ const renderPage = () =>
 async function startFileJob() {
   const user = userEvent.setup()
   renderPage()
-  await user.click(await screen.findByRole('tab', { name: 'File' }))
+  await user.click(await screen.findByRole('radio', { name: 'File' }))
   await user.click(screen.getByRole('button', { name: 'Choose file' }))
   await screen.findByText('interview.mp3')
   return user
@@ -95,7 +95,7 @@ describe('TranscribePage', () => {
     mockBackend(handlers({ transcribe_file: reject('Not enough free memory to run whisper-base: it needs about 1.2 GB.') }))
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('tab', { name: 'File' }))
+    await user.click(await screen.findByRole('radio', { name: 'File' }))
     await user.click(screen.getByRole('button', { name: 'Choose file' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Not enough free memory to run whisper-base')
   })
@@ -115,7 +115,7 @@ describe('TranscribePage', () => {
     const backend = mockBackend(handlers({ transcribe_file: () => new Promise<string>((r) => (resolveJob = r)) }))
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('tab', { name: 'File' }))
+    await user.click(await screen.findByRole('radio', { name: 'File' }))
     await user.click(screen.getByRole('button', { name: 'Choose file' }))
     await user.click(await screen.findByRole('button', { name: 'Cancel' }))
     expect(screen.getByRole('button', { name: 'Cancelling…' })).toBeDisabled()
@@ -149,11 +149,11 @@ describe('TranscribePage', () => {
     const backend = mockBackend(handlers())
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('tab', { name: 'File' }))
+    await user.click(await screen.findByRole('radio', { name: 'File' }))
     await act(() => useJobs.getState().start('tts', () => Promise.resolve('job-tts')))
     expect(screen.getByRole('button', { name: 'Choose file' })).toBeDisabled()
     expect(screen.getByText('Wait for speech generation to finish.')).toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: 'Record' }))
+    await user.click(screen.getByRole('radio', { name: 'Record' }))
     expect(screen.getByRole('button', { name: 'Start recording' })).toBeDisabled()
     expect(backend.count('transcribe_file')).toBe(0)
   })
@@ -178,3 +178,16 @@ function LocationProbe() {
   const location = useLocation()
   return <p data-testid="location">{location.pathname + location.search}</p>
 }
+
+describe('TranscribePage while recording', () => {
+  it('locks the source switch', async () => {
+    mockBackend(handlers({ start_recording: null, stop_recording: { tempAudioPath: 'cache/rec.wav', durationMs: 900 } }))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Start recording' }))
+    await screen.findByRole('button', { name: 'Stop recording' })
+    expect(screen.getByRole('radio', { name: 'File' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Stop recording' }))
+    expect(await screen.findByRole('radio', { name: 'File' })).toBeEnabled()
+  })
+})

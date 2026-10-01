@@ -1,6 +1,6 @@
 [package]
 name = "talkr"
-version = "0.1.5"
+version = "0.1.6"
 description = "Free, private, offline speech tools"
 authors = ["Talkr Contributors"]
 license = "MIT"
@@ -63,6 +63,8 @@ hound = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# An independent decoder that checks the FLAC exporter round-trips samples exactly.
+symphonia = { version = "0.6.1", default-features = false, features = ["flac"] }
 
 # Dependencies' debug info is most of a debug build's size; line tables keep backtraces useful.
 [profile.dev]

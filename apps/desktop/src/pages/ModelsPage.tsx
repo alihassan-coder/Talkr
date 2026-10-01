@@ -292,9 +292,11 @@ function ImportedRow({ model }: { model: InstalledModel }) {
   return (
     <li className="flex items-center gap-6 px-5 py-4 transition-colors duration-200 hover:bg-fg/[0.03]">
       <div className="min-w-0 flex-1">
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
-          <span className="font-medium tracking-[-0.01em]">{model.name}</span>
-          <span className="text-muted">Imported</span>
+        <p className="flex min-w-0 items-center gap-x-2 text-[14px]">
+          <span className="min-w-0 truncate font-medium tracking-[-0.01em]" title={model.name}>
+            {model.name}
+          </span>
+          <span className="shrink-0 text-muted">Imported</span>
         </p>
         <p className="mt-1 line-clamp-1 text-[13px] text-muted">Added from a file on this computer.</p>
         <p className="mt-1.5 truncate font-mono text-[11px] text-subtle" title={model.path}>

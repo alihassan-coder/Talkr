@@ -1,0 +1,9 @@
+# One Rust version for every machine and CI job. With plain "stable", each new Rust release (every
+# six weeks) can add clippy lints that CI's -D warnings turns into failures, and it throws away
+# every build cache, so whisper.cpp recompiles from scratch on all runners.
+# Bump it on purpose, in its own PR, together with `toolchain:` in .github/workflows/*.yml
+# (scripts/check-versions.mjs checks they agree).
+[toolchain]
+channel = "1.98.1"
+components = ["clippy"]
+profile = "minimal"

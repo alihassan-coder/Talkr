@@ -1,10 +1,12 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { flush, historyFixture, mockBackend, pathsFixture, reject } from '@/test/tauri'
 import type { HistoryItem } from '@/lib/types'
+import { useJobs } from '@/stores/jobs'
+import { useDrafts } from '@/stores/drafts'
 
 const items: HistoryItem[] = [
   historyFixture({ id: 'a', title: 'Q3 planning call', text: 'Revenue is up eleven percent', kind: 'stt' }),
@@ -80,7 +82,7 @@ describe('HistoryPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Q3 planning call')
-    await user.click(screen.getByRole('tab', { name: 'Speech' }))
+    await user.click(screen.getByRole('radio', { name: 'Speech' }))
     expect(await screen.findByText('Welcome message')).toBeInTheDocument()
     expect(screen.queryByText('Q3 planning call')).not.toBeInTheDocument()
     expect(backend.argsOf('history_list').at(-1)).toMatchObject({ kind: 'tts' })
@@ -122,7 +124,7 @@ describe('HistoryPage', () => {
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: 'Load more' }))
-    await user.click(screen.getByRole('tab', { name: 'Speech' }))
+    await user.click(screen.getByRole('radio', { name: 'Speech' }))
     expect(await screen.findByText('Welcome message')).toBeInTheDocument()
     await act(async () => releaseMore())
     await flush()
@@ -141,7 +143,7 @@ describe('HistoryPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Q3 planning call')
-    await user.click(screen.getByRole('tab', { name: 'Speech' }))
+    await user.click(screen.getByRole('radio', { name: 'Speech' }))
     expect(screen.getByRole('status', { name: 'Loading history' })).toBeInTheDocument()
     expect(screen.queryByText('Q3 planning call')).not.toBeInTheDocument()
     await act(async () => releaseTts())
@@ -195,5 +197,73 @@ describe('HistoryPage', () => {
     await user.click(screen.getByRole('button', { name: /تسجيل/ }))
     expect(screen.getByText('مرحبا')).toHaveAttribute('dir', 'auto')
     await waitFor(() => expect(backend.argsOf('read_history_audio')).toEqual([{ id: 'ar' }]))
+  })
+})
+
+function Where() {
+  return <p data-testid="where">{useLocation().pathname}</p>
+}
+
+describe('HistoryPage, live', () => {
+  it('drops an un-starred item from the favorites view', async () => {
+    backendWith([{ ...items[0]!, favorite: true }, { ...items[1]!, favorite: true }])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Q3 planning call')
+    await user.click(screen.getByRole('button', { name: 'Show favorites only' }))
+    await screen.findByText('Welcome message')
+    await user.click(screen.getAllByRole('button', { name: 'Remove from favorites' })[0]!)
+    await waitFor(() => expect(screen.queryByText('Q3 planning call')).not.toBeInTheDocument())
+    expect(screen.getByText('Welcome message')).toBeInTheDocument()
+  })
+
+  it('shows a job that finishes while the page is open, without a spinner', async () => {
+    const list = [items[0]!]
+    mockBackend({ history_list: () => ({ items: [...list], nextCursor: null }) })
+    renderPage()
+    await screen.findByText('Q3 planning call')
+    list.unshift(historyFixture({ id: 'new', title: 'Fresh transcript', kind: 'stt' }))
+    act(() => {
+      const slot = useJobs.getState().stt
+      useJobs.setState({ stt: { ...slot, result: { item: list[0]!, label: 'x', seq: 1 } } })
+    })
+    expect(await screen.findByText('Fresh transcript')).toBeInTheDocument()
+    expect(screen.getByText('Q3 planning call')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading history' })).not.toBeInTheDocument()
+  })
+
+  it('copies a transcript with timestamps', async () => {
+    const timed = historyFixture({
+      id: 't',
+      title: 'Standup',
+      kind: 'stt',
+      segmentsJson: JSON.stringify([
+        { startMs: 0, endMs: 1000, text: ' Morning all. ' },
+        { startMs: 65_000, endMs: 66_000, text: 'Ship it.' },
+      ]),
+    })
+    backendWith([timed])
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /Standup/ }))
+    await user.click(screen.getByRole('button', { name: 'Copy with timestamps' }))
+    expect(await navigator.clipboard.readText()).toBe('[0:00] Morning all.\n[1:05] Ship it.')
+  })
+
+  it('opens a speech item in Speak with its text', async () => {
+    backendWith(items)
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <Routes>
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/speak" element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await user.click(await screen.findByRole('button', { name: /Welcome message/ }))
+    await user.click(screen.getByRole('button', { name: 'Open in Speak' }))
+    expect(screen.getByTestId('where')).toHaveTextContent('/speak')
+    expect(useDrafts.getState().speakText).toBe('Welcome to Talkr')
   })
 })

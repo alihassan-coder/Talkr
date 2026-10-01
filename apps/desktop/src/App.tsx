@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { Sidebar } from '@/components/Sidebar'
 import { SystemStatus } from '@/components/SystemStatus'
@@ -9,6 +9,7 @@ import { ModelsPage } from '@/pages/ModelsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { UpdateNotice } from '@/features/updates/UpdateNotice'
+import { ShortcutsDialog } from '@/features/shortcuts/ShortcutsDialog'
 import { useApplyAppearance } from '@/lib/appearance'
 import { useUi } from '@/stores/ui'
 
@@ -41,10 +42,42 @@ function useNavigationShortcuts() {
   }, [navigate])
 }
 
+/** Whether a key press is going into a text field (where "?" is just a character). */
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+
+/**
+ * The packaged app is not a web page: reload (F5, Ctrl/Cmd+R) would drop running jobs' events,
+ * and printing makes no sense. Development builds keep them.
+ */
+function isBrowserKey(e: KeyboardEvent) {
+  const mod = e.ctrlKey || e.metaKey
+  const key = e.key.toLowerCase()
+  return e.key === 'F5' || (mod && (key === 'r' || key === 'p'))
+}
+
 export function App() {
   useNavigationShortcuts()
   useApplyAppearance()
   const location = useLocation()
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (import.meta.env.PROD && isBrowserKey(e)) {
+        e.preventDefault()
+        return
+      }
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e.target)) {
+        e.preventDefault()
+        setShortcutsOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Stop the WebView from behaving like a browser: no reload menu, no file drops navigating away.
   useEffect(() => {
@@ -63,6 +96,9 @@ export function App() {
     <div className="flex h-full">
       <Sidebar footer={<SystemStatus />} />
       <main className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-4xl px-10 pt-6 empty:hidden">
+          <UpdateNotice />
+        </div>
         <div key={location.pathname} className="mx-auto max-w-4xl animate-rise px-10 py-9">
           <Routes>
             <Route path="/" element={<Navigate to="/speak" replace />} />
@@ -75,7 +111,7 @@ export function App() {
           </Routes>
         </div>
       </main>
-      <UpdateNotice />
+      {shortcutsOpen ? <ShortcutsDialog onClose={closeShortcuts} /> : null}
       <Toaster />
     </div>
   )

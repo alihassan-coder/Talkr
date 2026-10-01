@@ -133,6 +133,15 @@ export const historyToggleFavorite = (args: { id: string }) => invoke<boolean>('
 export const historyExport = (args: { id: string; format: ExportFormat }) =>
   invoke<string | null>('history_export', args)
 
+/**
+ * Save audio the webview encoded (MP3) for a history item via a native save dialog. The bytes
+ * travel as the raw IPC body. Resolves to the saved path, or null if the user cancelled.
+ */
+export const saveExportBytes = (args: { id: string; format: 'mp3'; bytes: Uint8Array }) =>
+  invoke<string | null>('save_export_bytes', args.bytes, {
+    headers: { 'x-history-id': args.id, 'x-format': args.format },
+  })
+
 /** Delete all non-favorite items; resolves to the number deleted. */
 export const historyClear = () => invoke<number>('history_clear')
 

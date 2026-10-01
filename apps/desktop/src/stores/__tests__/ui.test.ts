@@ -9,7 +9,7 @@ const rehydrateFrom = async (state: unknown) => {
 }
 
 afterEach(() => {
-  useUi.setState({ sidebarCollapsed: false, mode: 'system', theme: 'graphite' })
+  useUi.setState({ sidebarCollapsed: false, mode: 'system', theme: 'graphite', audioFormat: 'wav', textFormat: 'txt' })
 })
 
 describe('ui store', () => {
@@ -28,10 +28,33 @@ describe('ui store', () => {
     expect(saved()?.state.sidebarCollapsed).toBe(false)
   })
 
-  it('persists mode and theme, and only those fields', () => {
+  it('persists mode, theme and export formats, and only those fields', () => {
     useUi.getState().setMode('light')
     useUi.getState().setTheme('ocean')
-    expect(saved()?.state).toEqual({ sidebarCollapsed: false, mode: 'light', theme: 'ocean' })
+    expect(saved()?.state).toEqual({
+      sidebarCollapsed: false,
+      mode: 'light',
+      theme: 'ocean',
+      audioFormat: 'wav',
+      textFormat: 'txt',
+    })
+  })
+
+  it('remembers the last audio and text format separately', () => {
+    useUi.getState().rememberFormat('mp3')
+    useUi.getState().rememberFormat('srt')
+    expect(useUi.getState()).toMatchObject({ audioFormat: 'mp3', textFormat: 'srt' })
+    useUi.getState().rememberFormat('flac')
+    expect(useUi.getState()).toMatchObject({ audioFormat: 'flac', textFormat: 'srt' })
+    expect(saved()?.state).toMatchObject({ audioFormat: 'flac', textFormat: 'srt' })
+  })
+
+  it('ignores stored export formats it does not know', async () => {
+    useUi.setState({ audioFormat: 'mp3', textFormat: 'md' })
+    await rehydrateFrom({ audioFormat: 'ogg', textFormat: 'docx' })
+    expect(useUi.getState()).toMatchObject({ audioFormat: 'mp3', textFormat: 'md' })
+    await rehydrateFrom({ audioFormat: 'flac', textFormat: 'vtt' })
+    expect(useUi.getState()).toMatchObject({ audioFormat: 'flac', textFormat: 'vtt' })
   })
 
   it('restores saved preferences', async () => {

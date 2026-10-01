@@ -17,21 +17,23 @@ export function RecentList({
   return (
     <section>
       <Kicker className="mb-3 px-1">Recent</Kicker>
-      <ul className="divide-y divide-line rounded-2xl border border-line">
+      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line">
         {items.map((item) => (
           <li key={item.id}>
             <button
               type="button"
               onClick={() => onSelect(item)}
               className={cx(
-                'group flex w-full items-center gap-4 px-4 py-3 text-left transition-colors duration-200 first:rounded-t-2xl hover:bg-fg/[0.04]',
+                'group flex w-full items-center gap-4 px-4 py-3 text-left outline-none transition-colors duration-200 hover:bg-fg/[0.04] focus-visible:bg-fg/[0.06]',
                 item.id === activeId && 'bg-fg/[0.04]',
               )}
             >
               <span className="grid size-7 shrink-0 place-items-center rounded-full border border-line text-subtle transition-colors group-hover:border-line-strong group-hover:text-fg">
                 <Play className="size-3 translate-x-px" fill="currentColor" strokeWidth={0} />
               </span>
-              <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg">{item.title}</span>
+              <span dir="auto" className="min-w-0 flex-1 truncate text-[13.5px] text-fg">
+                {item.title}
+              </span>
               {item.voiceId ? (
                 <span className="hidden max-w-32 truncate font-mono text-[11px] text-subtle sm:block">{item.voiceId}</span>
               ) : null}

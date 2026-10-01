@@ -1,10 +1,15 @@
-import { useRef, useState } from 'react'
-import type { PointerEvent } from 'react'
+import { useImperativeHandle, useRef, useState } from 'react'
+import type { PointerEvent, Ref } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { Waveform } from '@/components/Waveform'
 import { speechBars } from '@/lib/waveform'
+import { nextSpeed, play, speedLabel } from '@/lib/playback'
+import { toastError } from '@/stores/toast'
 import { formatClock, hashSeed } from './utils'
 import { useAudioUrl } from '@/lib/useAudioUrl'
+
+/** Lets a transcript jump the player to a segment. */
+export type PlayerHandle = { playFrom: (seconds: number) => void }
 
 /** Minimal player: play/pause, a seekable waveform and mono time. Key it by item id to reset. */
 export function AudioPlayer({
@@ -12,12 +17,14 @@ export function AudioPlayer({
   path,
   seed,
   fallbackDurationMs,
+  ref,
 }: {
   /** History item id; the backend reads its audio. */
   id: string
   path: string
   seed: string
   fallbackDurationMs: number | null
+  ref?: Ref<PlayerHandle>
 }) {
   const { url, error } = useAudioUrl(id, path)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -25,7 +32,18 @@ export function AudioPlayer({
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState((fallbackDurationMs ?? 0) / 1000)
   const [failed, setFailed] = useState(false)
+  const [speed, setSpeed] = useState(1)
   const bars = speechBars(56, { seed: hashSeed(seed), phrases: 4 })
+
+  useImperativeHandle(ref, () => ({
+    playFrom: (seconds: number) => {
+      const audio = audioRef.current
+      if (!audio) return
+      audio.currentTime = Math.max(0, seconds)
+      setCurrent(audio.currentTime)
+      play(audio).catch(toastError)
+    },
+  }))
 
   if (failed || error) {
     return <p className="font-mono text-[11px] text-subtle">Audio file is not available.</p>
@@ -34,8 +52,16 @@ export function AudioPlayer({
   const toggle = () => {
     const audio = audioRef.current
     if (!audio) return
-    if (audio.paused) void audio.play().catch(() => setFailed(true))
+    // Only the element's error event marks the file as unplayable: a rejected play() can just
+    // mean a double click interrupted it.
+    if (audio.paused) play(audio).catch(toastError)
     else audio.pause()
+  }
+
+  const changeSpeed = () => {
+    const next = nextSpeed(speed)
+    setSpeed(next)
+    if (audioRef.current) audioRef.current.playbackRate = next
   }
 
   const seek = (e: PointerEvent<HTMLDivElement>) => {
@@ -55,7 +81,10 @@ export function AudioPlayer({
         ref={audioRef}
         src={url ?? undefined}
         preload="metadata"
-        onPlay={() => setPlaying(true)}
+        onPlay={(e) => {
+          e.currentTarget.playbackRate = speed
+          setPlaying(true)
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
@@ -105,6 +134,15 @@ export function AudioPlayer({
       <span className="shrink-0 font-mono text-[11px] tabular-nums text-subtle">
         {formatClock(current * 1000)} / {formatClock(duration * 1000)}
       </span>
+      <button
+        type="button"
+        onClick={changeSpeed}
+        aria-label={`Playback speed ${speedLabel(speed)}`}
+        title="Playback speed"
+        className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-subtle transition-colors hover:bg-fg/[0.06] hover:text-fg"
+      >
+        {speedLabel(speed)}
+      </button>
     </div>
   )
 }

@@ -23,7 +23,10 @@ export function DropZone({
   const [over, setOver] = useState(false)
 
   const handleDrop = useEffectEvent((paths: string[]) => {
-    if (disabled) return
+    if (disabled) {
+      if (disabledReason) toast(disabledReason)
+      return
+    }
     const path = paths.find(isAudioPath)
     if (path) onFile(path)
     else toast(unsupported)
@@ -76,7 +79,7 @@ export function DropZone({
       >
         <Upload className="size-5" strokeWidth={1.75} />
       </span>
-      <p className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{over ? 'Release to transcribe' : 'Drop an audio file'}</p>
+      <p className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{over ? (disabled ? 'Not right now' : 'Release to transcribe') : 'Drop an audio file'}</p>
       <p className="mt-1.5 font-mono text-[11px] tracking-wide text-subtle">MP3, WAV, FLAC, OGG, M4A</p>
       <Button
         className="mt-6"

@@ -43,25 +43,30 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The full engine tests need native libraries and test models; CI runs them on Windows, macOS, and Linux.
 
-### Building installers locally
+### Building installers
 
-Release builds create signed updater artifacts (`bundle.createUpdaterArtifacts`), which needs the project's private signing key. Without it, `pnpm build:desktop` stops with a signing error; turn the updater artifacts off for a local build instead:
+You don't need a powerful computer: the **Test build** workflow builds installers for Windows, macOS and Linux on GitHub's machines. Open the repository's **Actions** tab, pick **Test build**, press **Run workflow**, choose the platforms, and download the installers from the finished run's **Artifacts** (kept for 7 days). It uses the same steps as a release, so a green test build means the release will build too.
+
+To build on your own machine instead: release builds create signed updater artifacts (`bundle.createUpdaterArtifacts`), which needs the project's private signing key. Without it, `pnpm build:desktop` stops with a signing error; turn the updater artifacts off for a local build instead:
 
 ```bash
 pnpm --filter desktop tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
-The Tauri plugins exist twice, as Rust crates (`apps/desktop/src-tauri/Cargo.toml`) and npm packages (`apps/desktop/package.json`). Keep each pair on the same major.minor version and update them together.
+The Tauri plugins exist twice, as Rust crates (`apps/desktop/src-tauri/Cargo.toml`) and npm packages (`apps/desktop/package.json`). Keep each pair on the same major.minor version and update them together; `node scripts/check-versions.mjs` checks the locked versions.
+
+Rust is pinned in `apps/desktop/src-tauri/rust-toolchain.toml` (rustup installs it on first use). To move to a newer Rust, change it there and in the `toolchain:` lines of `.github/workflows/*.yml` in one PR, and fix any new clippy warnings in the same PR.
 
 ## Releasing
 
 Maintainers only. The order matters, because installed copies and the website both follow the release:
 
-1. Bump the version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`, the three `Cargo.toml` files under `apps/desktop/src-tauri` and `apps/web/lib/releases.ts` (update the download sizes there after the build). `node scripts/check-versions.mjs` must pass; CI runs it too.
-2. Merge to `master`, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must equal `v` + the version, or the release workflow stops.
-3. The workflow runs CI, then builds, signs (`TAURI_SIGNING_PRIVATE_KEY` secret) and uploads every installer, its updater signature, `latest.json` and `SHA256SUMS-*.txt` to a **draft** release.
-4. Test the draft's installers, then **Publish** it. Publishing makes `releases/latest/download/latest.json` point at it, which is when installed copies offer the update.
-5. Deploy the website last. Its links point at `releases/download/vX.Y.Z/…`, which 404 while the release is still a draft.
+1. Move the **Unreleased** notes in `CHANGELOG.md` under a `## X.Y.Z - date` heading. They become the release notes and the "What's new" text the app shows with the update; the release stops if the section is missing (`node scripts/release-notes.mjs X.Y.Z` prints it).
+2. Bump the version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`, the three `Cargo.toml` files under `apps/desktop/src-tauri` and `apps/web/lib/releases.ts` (update the download sizes there after the build). `node scripts/check-versions.mjs` must pass; CI runs it too.
+3. Merge to `master` and let CI finish, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must equal `v` + the version, or the release workflow stops.
+4. The workflow reuses that commit's CI run when every job passed (otherwise it runs CI itself), then builds, signs (`TAURI_SIGNING_PRIVATE_KEY` secret) and uploads every installer, its updater signature, `latest.json` and `SHA256SUMS-*.txt` to a **draft** release.
+5. Test the draft's installers, then **Publish** it. Publishing makes `releases/latest/download/latest.json` point at it, which is when installed copies offer the update.
+6. Deploy the website last. Its links point at `releases/download/vX.Y.Z/…`, which 404 while the release is still a draft.
 
 ## Pull requests
 

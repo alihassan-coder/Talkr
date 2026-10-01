@@ -238,7 +238,11 @@ export interface HistoryListParams {
   favoritesOnly?: boolean
 }
 
-export type ExportFormat = 'txt' | 'srt' | 'wav'
+/** Formats the backend writes itself (`history_export`). */
+export type ExportFormat = 'txt' | 'md' | 'srt' | 'vtt' | 'json' | 'csv' | 'wav' | 'flac'
+
+/** Every format the app can save: backend formats plus MP3, which the webview encodes. */
+export type SaveFormat = ExportFormat | 'mp3'
 
 // ---------- events ----------
 

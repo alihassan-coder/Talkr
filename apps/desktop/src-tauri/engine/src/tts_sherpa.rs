@@ -57,6 +57,8 @@ impl Backend {
 pub struct SherpaTtsEngine {
     tts: Mutex<Backend>,
     model_id: String,
+    /// Inference threads it was loaded with; a new setting reloads the model.
+    threads: usize,
     voices: Vec<Voice>,
 }
 
@@ -173,6 +175,7 @@ impl SherpaTtsEngine {
         Ok(Self {
             tts: Mutex::new(backend),
             model_id,
+            threads: num_threads,
             voices,
         })
     }
@@ -181,6 +184,10 @@ impl SherpaTtsEngine {
 impl SherpaTtsEngine {
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    pub fn threads(&self) -> usize {
+        self.threads
     }
 
     pub fn voices(&self) -> Vec<Voice> {

@@ -80,10 +80,10 @@ describe('Settings > Compute', () => {
     const user = userEvent.setup()
     await renderPage()
     await screen.findByText(/The GPU engine stopped/)
-    const group = within(compute()).getByRole('tablist', { name: 'Acceleration' })
-    expect(within(group).getByRole('tab', { name: 'Auto' })).toHaveAttribute('aria-selected', 'true')
+    const group = within(compute()).getByRole('radiogroup', { name: 'Acceleration' })
+    expect(within(group).getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true')
 
-    await user.click(within(group).getByRole('tab', { name: 'CPU' }))
+    await user.click(within(group).getByRole('radio', { name: 'CPU' }))
     expect(api.argsOf('update_settings')).toEqual([{ settings: { device: 'cpu' } }])
     await within(compute()).findByText('CPU', { selector: 'span[aria-live]' })
     expect(api.count('get_engine_status')).toBe(2)
@@ -91,7 +91,7 @@ describe('Settings > Compute', () => {
     const order = api.calls.map((c) => c.cmd).filter((c) => c === 'update_settings' || c === 'get_engine_status')
     expect(order).toEqual(['get_engine_status', 'update_settings', 'get_engine_status'])
     expect(screen.queryByText(/The GPU engine stopped/)).not.toBeInTheDocument()
-    expect(within(group).getByRole('tab', { name: 'CPU' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(group).getByRole('radio', { name: 'CPU' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('explains when the engine status cannot be read', async () => {

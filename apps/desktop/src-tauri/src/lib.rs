@@ -88,16 +88,22 @@ impl AppState {
     }
 
     /// Inference threads: the user setting, or physical cores (capped at 8) when set to 0 (auto).
+    /// Never more than the logical CPUs this process may use (cgroup and affinity limits
+    /// included): extra threads only make whisper.cpp and onnxruntime slower.
     pub fn cpu_threads(&self) -> usize {
+        let available = num_cpus::get().max(1);
         match self.settings().cpu_threads {
-            0 => num_cpus::get_physical().clamp(1, 8),
-            n => n,
+            0 => num_cpus::get_physical().clamp(1, 8).min(available),
+            n => n.min(available),
         }
     }
 }
 
 /// How long a loaded model may sit unused before the engine process is stopped.
 const ENGINE_IDLE: Duration = Duration::from_secs(5 * 60);
+/// The same for an engine that holds no model (it only answered a device probe, e.g. for the
+/// Settings page): it costs memory (a GPU context, with Vulkan) and is quick to start again.
+const ENGINE_IDLE_NO_MODEL: Duration = Duration::from_secs(60);
 
 /// Lock a mutex, recovering from poisoning (a panicked job must not brick the app).
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -211,6 +217,7 @@ pub fn run() {
             history_delete,
             history_toggle_favorite,
             history_export,
+            save_export_bytes,
             history_clear,
             get_storage_usage,
             run_retention,
@@ -250,7 +257,9 @@ pub fn run() {
             let handle = app.handle().clone();
             std::thread::Builder::new().name("talkr-engine-idle".into()).spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
-                handle.state::<AppState>().engine.stop_if_idle(ENGINE_IDLE);
+                let state = handle.state::<AppState>();
+                let idle = if state.engine.resident_model().is_some() { ENGINE_IDLE } else { ENGINE_IDLE_NO_MODEL };
+                state.engine.stop_if_idle(idle);
             })?;
             Ok(())
         })

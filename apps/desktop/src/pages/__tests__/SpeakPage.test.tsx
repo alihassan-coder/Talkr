@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { SpeakPage } from '@/pages/SpeakPage'
 import { useJobs } from '@/stores/jobs'
+import { useToasts } from '@/stores/toast'
 import {
   emitEvent,
   flush,
@@ -72,7 +73,7 @@ describe('SpeakPage', () => {
     expect(screen.getByText('Generating speech…')).toBeInTheDocument()
 
     await emitEvent('tts://done', { jobId: 'job-7', historyItem: done })
-    expect(await screen.findByRole('button', { name: 'Save as WAV' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Save WAV' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: /Audio player/ })).toBeInTheDocument()
     expect(screen.queryByText('Generating speech…')).not.toBeInTheDocument()
   })
@@ -131,7 +132,7 @@ describe('SpeakPage', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
 
     await emitEvent('tts://done', { jobId: 'job-7', historyItem: done })
-    expect(await screen.findByRole('button', { name: 'Save as WAV' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Save WAV' })).toBeInTheDocument()
     expect(backend.argsOf('read_history_audio')).toEqual([{ id: 'job-7' }])
   })
 
@@ -149,7 +150,7 @@ describe('SpeakPage', () => {
     await emitEvent('tts://done', { jobId: 'job-7', historyItem: done })
     renderPage()
     expect(await screen.findByText('While away')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save as WAV' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save WAV' })).toBeInTheDocument()
   })
 
   it('does not start while a transcription runs, and says why', async () => {
@@ -228,3 +229,75 @@ async function flushUntil(done: () => boolean) {
   for (let i = 0; i < 20 && !done(); i++) await flush()
   await flush()
 }
+
+describe('SpeakPage drafts and guards', () => {
+  it('keeps the draft when the page is left and opened again', async () => {
+    mockBackend(handlers())
+    const user = userEvent.setup()
+    const { unmount } = renderPage()
+    await user.type(await screen.findByRole('textbox', { name: 'Text to speak' }), 'Half written')
+    unmount()
+    renderPage()
+    expect(await screen.findByRole('textbox', { name: 'Text to speak' })).toHaveValue('Half written')
+  })
+
+  it('counts words and estimates how long the speech will be', async () => {
+    mockBackend(handlers())
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(await screen.findByRole('textbox', { name: 'Text to speak' }), 'one two three')
+    expect(screen.getByText(/3 words · about 0:01/)).toBeInTheDocument()
+  })
+
+  it('says so when a paste is too long to fit', async () => {
+    mockBackend(handlers())
+    const user = userEvent.setup()
+    renderPage()
+    const box = await screen.findByRole('textbox', { name: 'Text to speak' })
+    await user.click(box)
+    await user.paste('x'.repeat(6000))
+    expect(useToasts.getState().toasts.at(-1)?.message).toMatch(/Only the first 5,000 characters fit/)
+  })
+
+  it('waits for the new voices after a model switch instead of sending the old voice', async () => {
+    let piperVoices!: (v: unknown) => void
+    mockBackend(
+      handlers({
+        list_installed_models: [
+          installedFixture({ id: 'kokoro', kind: 'tts', name: 'Kokoro' }),
+          installedFixture({ id: 'piper', kind: 'tts', name: 'Piper' }),
+        ],
+        list_voices: (args: Record<string, unknown>) =>
+          args.modelId === 'piper'
+            ? new Promise((r) => (piperVoices = r))
+            : [{ id: 'am_adam', name: 'Adam', language: 'en-US', gender: 'male' }],
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await user.type(await screen.findByRole('textbox', { name: 'Text to speak' }), 'Hello')
+    expect(await screen.findByRole('button', { name: /Generate/ })).toBeEnabled()
+    await user.click(screen.getByRole('combobox', { name: /Model/ }))
+    await user.click(screen.getByRole('option', { name: 'Piper' }))
+    expect(screen.getByRole('button', { name: /Generate/ })).toBeDisabled()
+    await act(async () => piperVoices([{ id: 'lessac', name: 'Lessac', language: 'en-US', gender: null }]))
+    expect(await screen.findByRole('button', { name: /Generate/ })).toBeEnabled()
+  })
+
+  it('reports a failed model load with a retry, not as "nothing installed"', async () => {
+    let fail = true
+    mockBackend(
+      handlers({
+        list_installed_models: () =>
+          fail ? Promise.reject('database is locked') : [installedFixture({ id: 'kokoro', kind: 'tts', name: 'Kokoro' })],
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByText('Could not load your installed models')).toBeInTheDocument()
+    expect(screen.queryByText('No voice installed yet')).not.toBeInTheDocument()
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('textbox', { name: 'Text to speak' })).toBeInTheDocument()
+  })
+})

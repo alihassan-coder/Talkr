@@ -53,6 +53,14 @@ fn rejects_unsafe_ids() {
         "<lt>",
         "quote\"",
         &"x".repeat(MAX_MODEL_ID_LEN + 1),
+        // Windows drops trailing dots and maps device names to devices.
+        "whisper-base.",
+        "model..",
+        "con",
+        "NUL",
+        "aux.bin",
+        "com1",
+        "Lpt9.en",
     ] {
         assert!(!is_valid_model_id(id), "{id:?} should be rejected");
         assert!(matches!(validate_model_id(id), Err(AppError::Validation(_))));

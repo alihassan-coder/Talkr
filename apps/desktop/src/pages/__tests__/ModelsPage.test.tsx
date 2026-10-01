@@ -166,7 +166,7 @@ describe('ModelsPage', () => {
     mockBackend(handlers())
     const user = userEvent.setup()
     await renderPage()
-    await user.click(screen.getByRole('tab', { name: 'Text to speech' }))
+    await user.click(screen.getByRole('radio', { name: 'Text to speech' }))
     expect(screen.getByText('Kokoro')).toBeInTheDocument()
     expect(screen.queryByText('Whisper Base')).not.toBeInTheDocument()
   })
@@ -190,7 +190,7 @@ describe('ModelsPage', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByText('Kokoro')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Text to speech' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: 'Text to speech' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('names download progress for screen readers', async () => {

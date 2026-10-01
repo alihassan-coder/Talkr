@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { History, LoaderCircle, Mic, RotateCw, Search, SearchX, Star, TriangleAlert, Volume2, X } from 'lucide-react'
 import { historyList, historyToggleFavorite, isTauri } from '@/lib/api'
 import type { HistoryItem, HistoryKind } from '@/lib/types'
@@ -6,6 +6,8 @@ import { Button, Card, EmptyState, IconButton, Kbd, Kicker, PageHeader, Segmente
 import { cx } from '@/lib/cx'
 import { errorText } from '@/lib/errors'
 import { toastError } from '@/stores/toast'
+import { useJobs } from '@/stores/jobs'
+import { modKey } from '@/lib/platform'
 import { HistoryDetail } from '@/features/history/HistoryDetail'
 import { filterSample } from '@/features/history/sample'
 import { formatDuration, groupByDay, relativeTime } from '@/features/history/utils'
@@ -39,7 +41,9 @@ export function HistoryPage() {
   const filterKey = JSON.stringify([query, kind, favoritesOnly, reload])
   // Until the first page for the current filters arrives, nothing older is shown.
   const loading = page?.key !== filterKey
-  const items = page && !loading ? page.items : []
+  // With "favorites only" on, an item un-starred here leaves the list (it stays in state, so a
+  // failed toggle can put it back).
+  const items = page && !loading ? page.items.filter((i) => !favoritesOnly || i.favorite) : []
   const cursor = page && !loading ? page.cursor : null
   const loadError = page && !loading ? page.error : null
   const loadingMore = loadingMoreKey === filterKey
@@ -73,6 +77,31 @@ export function HistoryPage() {
       cancelled = true
     }
   }, [query, kind, favoritesOnly, filterKey])
+
+  // A job that finishes while History is open shows up without a reload or a spinner.
+  const finished = useJobs((s) => `${s.tts.result?.seq ?? 0}:${s.stt.result?.seq ?? 0}`)
+  const refreshQuietly = useEffectEvent(() => {
+    if (!isTauri() || !page || page.key !== filterKey) return
+    const key = filterKey
+    historyList({ query, kind: kind === 'all' ? null : kind, favoritesOnly })
+      .then((res) =>
+        setPage((prev) => {
+          if (!prev || prev.key !== key) return prev
+          const fresh = new Set(res.items.map((i) => i.id))
+          const older = prev.items.filter((i) => !fresh.has(i.id))
+          // Keep pages loaded with "Load more" (and their cursor).
+          const keptMore = prev.items.length > res.items.length
+          return { ...prev, items: [...res.items, ...older], cursor: keptMore ? prev.cursor : res.nextCursor }
+        }),
+      )
+      .catch(() => {})
+  })
+  const seenFinished = useRef(finished)
+  useEffect(() => {
+    if (finished === seenFinished.current) return
+    seenFinished.current = finished
+    refreshQuietly()
+  }, [finished])
 
   // A newly selected item: move focus to its details and make sure they are on screen
   // (below the lg breakpoint the panel sits under the list).
@@ -204,7 +233,7 @@ export function HistoryPage() {
             </button>
           ) : (
             <span className="pointer-events-none hidden items-center gap-1 sm:flex">
-              <Kbd>Ctrl</Kbd>
+              <Kbd>{modKey()}</Kbd>
               <Kbd>F</Kbd>
             </span>
           )}

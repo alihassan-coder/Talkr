@@ -5,8 +5,12 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  # The release workflow runs this first and only builds installers when it passes.
+  # The release workflow runs this when the tagged commit has no passing CI run yet.
   workflow_call:
+  # Nightly: the whole matrix (GPU and Intel Mac included), whatever changed.
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
 
 # Read-only token: CI only checks code, it never writes to the repo.
 permissions:
@@ -17,6 +21,40 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
+  # Rust jobs take 10-25 minutes; a change to the website or the docs does not need them. Skipped
+  # jobs count as passed for branch protection.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      engine: ${{ steps.filter.outputs.engine }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          everything() { echo "rust=true" >> "$GITHUB_OUTPUT"; echo "engine=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # Nightly, manual and release (tag) runs test everything, and so does a push whose base
+          # is unknown (a new branch, a force push).
+          case "$EVENT" in schedule|workflow_dispatch) everything ;; esac
+          if [ "$REF_TYPE" = "tag" ]; then everything; fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then everything; fi
+          changed=$(git diff --name-only "$BASE" HEAD)
+          printf 'Changed files:\n%s\n' "$changed"
+          has() { if grep -qE "$1" <<< "$changed"; then echo true; else echo false; fi; }
+          # Workflows, the build scripts and the model catalog (the test models) affect every Rust job.
+          shared='^(\.github/workflows/|apps/desktop/scripts/|packages/model-catalog/|apps/desktop/src-tauri/(Cargo\.(toml|lock)|rust-toolchain\.toml|\.cargo/))'
+          echo "rust=$(has "$shared|^apps/desktop/src-tauri/")" >> "$GITHUB_OUTPUT"
+          echo "engine=$(has "$shared|^apps/desktop/src-tauri/(engine|protocol)/")" >> "$GITHUB_OUTPUT"
+
   js:
     name: JS - typecheck, lint, unit tests, builds, web e2e
     runs-on: ubuntu-latest
@@ -45,6 +83,8 @@ jobs:
 
   audit:
     name: Rust - security advisories (cargo audit)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -57,6 +97,8 @@ jobs:
 
   rust:
     name: Rust - clippy and tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -74,9 +116,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: stable
+          toolchain: 1.98.1
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -122,8 +165,11 @@ jobs:
           export PATH="$PWD/target/debug:$PATH"
           cargo test --workspace --locked
 
+  # The engine's GPU path only changes with the engine itself; nightly runs cover the rest.
   gpu-engine:
     name: Rust - Vulkan engine build and GPU tests (${{ matrix.os }}, software Vulkan)
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -143,9 +189,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: stable
+          toolchain: 1.98.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop/src-tauri -> target
@@ -195,14 +242,17 @@ jobs:
   # Silicon; run the engine's unit tests on a real Intel Mac so it is at least exercised once.
   macos-intel:
     name: Rust - engine unit tests (macOS Intel)
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: stable
+          toolchain: 1.98.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop/src-tauri -> target
