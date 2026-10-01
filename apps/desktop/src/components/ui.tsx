@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
+import { useRef } from 'react'
+import type { ButtonHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { cx } from '@/lib/cx'
 
@@ -105,27 +106,52 @@ export function PageHeader({ title, description, actions }: { title: string; des
   )
 }
 
-/** Horizontal segmented control with a sliding thumb. */
+/**
+ * Horizontal segmented control with a sliding thumb: a WAI-ARIA radio group. Tab reaches the
+ * selected option, arrow keys (and Home/End) move the selection.
+ */
 export function Segmented<T extends string>({
   value,
   options,
   onChange,
   label,
+  disabled = false,
 }: {
   value: T
   options: { value: T; label: string; icon?: ReactNode }[]
   onChange: (value: T) => void
   label: string
+  disabled?: boolean
 }) {
   const index = Math.max(
     0,
     options.findIndex((o) => o.value === value),
   )
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+
+  const onKeyDown = (e: ReactKeyboardEvent, current: number) => {
+    const count = options.length
+    const moves: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
+    let next: number
+    if (e.key in moves) next = (current + (moves[e.key] ?? 0) + count) % count
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = count - 1
+    else return
+    e.preventDefault()
+    const option = options[next]
+    if (option && option.value !== value) onChange(option.value)
+    refs.current[next]?.focus()
+  }
+
   return (
     <div
-      role="tablist"
+      role="radiogroup"
       aria-label={label}
-      className="relative inline-grid rounded-full border border-line bg-fg/[0.04] p-0.5"
+      aria-disabled={disabled || undefined}
+      className={cx(
+        'relative inline-grid rounded-full border border-line bg-fg/[0.04] p-0.5 transition-opacity duration-200',
+        disabled && 'opacity-50',
+      )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       <span
@@ -133,22 +159,31 @@ export function Segmented<T extends string>({
         className="absolute inset-y-0.5 left-0.5 rounded-full bg-accent shadow-[var(--shadow-card)] transition-transform duration-400 ease-out-quint"
         style={{ width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(${index * 100}%)` }}
       />
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="tab"
-          aria-selected={o.value === value}
-          onClick={() => onChange(o.value)}
-          className={cx(
-            'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-300',
-            o.value === value ? 'text-on-accent' : 'text-muted hover:text-fg',
-          )}
-        >
-          {o.icon}
-          {o.label}
-        </button>
-      ))}
+      {options.map((o, i) => {
+        const selected = o.value === value
+        return (
+          <button
+            key={o.value}
+            ref={(el) => {
+              refs.current[i] = el
+            }}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            disabled={disabled}
+            onClick={() => onChange(o.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            className={cx(
+              'relative z-10 inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium outline-none transition-colors duration-300 focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed',
+              selected ? 'text-on-accent' : 'text-muted enabled:hover:text-fg',
+            )}
+          >
+            {o.icon}
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

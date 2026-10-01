@@ -31,3 +31,17 @@ export function relativeTime(timestamp: number, now = Date.now()) {
 }
 
 export const MAX_CHARS = 5000
+
+/** Typical narration pace: about 15 characters (two and a half words) per second at 1×. */
+const CHARS_PER_SECOND = 15
+
+export function countWords(text: string) {
+  const words = text.trim().match(/\S+/g)
+  return words ? words.length : 0
+}
+
+/** Rough length of the speech for `text` at `speed`, in ms. */
+export function estimateSpeechMs(text: string, speed = 1) {
+  const chars = text.replace(/\s+/g, ' ').trim().length
+  return Math.round((chars / CHARS_PER_SECOND / Math.max(0.25, speed)) * 1000)
+}

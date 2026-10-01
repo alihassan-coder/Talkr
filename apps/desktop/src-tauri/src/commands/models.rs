@@ -270,8 +270,10 @@ pub(crate) fn model_id_from_name(name: &str) -> Result<String> {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
         .collect();
-    let trimmed = mapped.trim_start_matches(['.', '-']).trim_end_matches('-');
+    let trimmed = mapped.trim_start_matches(['.', '-']);
     let id: String = trimmed.chars().take(MAX_MODEL_ID_LEN).collect();
+    // After the cut, so a long name cannot end in a dot (Windows would drop it).
+    let id = id.trim_end_matches(['-', '.']).to_string();
     if !is_valid_model_id(&id) || !id.bytes().any(|b| b.is_ascii_alphanumeric()) {
         return Err(AppError::Validation(format!(
             "Cannot derive a model name from \"{}\"; rename it using letters, digits, '.', '_' or '-'",

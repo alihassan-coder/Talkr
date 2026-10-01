@@ -106,6 +106,9 @@ fn model_id_from_file_names() {
     assert_eq!(model_id_from_name("C:evil").unwrap(), "C-evil");
     assert_eq!(model_id_from_name("caf\u{e9}").unwrap(), "caf");
     assert_eq!(model_id_from_name(&"a".repeat(300)).unwrap().len(), MAX_MODEL_ID_LEN);
+    assert_eq!(model_id_from_name("model v2.").unwrap(), "model-v2");
+    let cut = format!("{}.{}", "a".repeat(MAX_MODEL_ID_LEN - 1), "b".repeat(20));
+    assert_eq!(model_id_from_name(&cut).unwrap(), "a".repeat(MAX_MODEL_ID_LEN - 1));
     for bad in ["", ".", "..", "---", "(((", "\u{1F600}", "._-", "\u{0}"] {
         assert!(model_id_from_name(bad).is_err(), "{bad:?}");
     }

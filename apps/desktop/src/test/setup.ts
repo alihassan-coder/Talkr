@@ -3,6 +3,7 @@ import { cleanup } from '@testing-library/react'
 import { clearMocks } from '@tauri-apps/api/mocks'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { resetJobs } from '@/stores/jobs'
+import { useDrafts } from '@/stores/drafts'
 
 // jsdom lacks these browser APIs; the app uses them for the colour scheme and the Select list.
 function installMatchMedia(dark = true) {
@@ -38,6 +39,9 @@ afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 0))
   // Jobs live in an app-wide store: start every test without them or their event listeners.
   await resetJobs()
+  // App-wide in-memory stores start clean too. (Not the updates store: importing it here would
+  // load the real '@/lib/api' before a test file can mock it. Its tests reset it themselves.)
+  useDrafts.setState({ speakText: '' })
   clearMocks()
   // clearMocks keeps the (now empty) internals object; the app treats its presence as "in Tauri".
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__

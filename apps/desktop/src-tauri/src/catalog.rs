@@ -7,14 +7,23 @@ use crate::paths::AppPaths;
 /// Longest model id we accept. Ids become directory and file names.
 pub const MAX_MODEL_ID_LEN: usize = 100;
 
+/// Windows device names. They name no file there, with or without an extension.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
 /// Whether `id` is safe to use as a single path component on every platform:
 /// 1 to 100 characters from `[A-Za-z0-9._-]`, and not `.` or `..`. This rules out
-/// separators, drive prefixes (`C:`), alternate data streams and traversal.
+/// separators, drive prefixes (`C:`), alternate data streams and traversal. Windows also drops a
+/// trailing dot (so `whisper-base.` would open `whisper-base`) and maps device names such as
+/// `nul` to devices, so neither is a valid id.
 pub fn is_valid_model_id(id: &str) -> bool {
+    let stem = id.split('.').next().unwrap_or_default();
     !id.is_empty()
         && id.len() <= MAX_MODEL_ID_LEN
-        && id != "."
-        && id != ".."
+        && !id.ends_with('.')
+        && !RESERVED_NAMES.iter().any(|r| r.eq_ignore_ascii_case(stem))
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 

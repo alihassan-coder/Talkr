@@ -13,10 +13,13 @@ const toHeight = (level: number) => Math.min(1, Math.sqrt(Math.max(0, level)) * 
 
 export function Recorder({
   onRecorded,
+  onRecordingChange,
   disabled = false,
   disabledReason = null,
 }: {
   onRecorded: (path: string, durationMs: number) => void
+  /** Told when capture starts and ends, so the page can keep the user from switching away. */
+  onRecordingChange?: (recording: boolean) => void
   disabled?: boolean
   /** Shown while disabled, e.g. "Wait for speech generation to finish." */
   disabledReason?: string | null
@@ -30,7 +33,24 @@ export function Recorder({
   const recordingRef = useRef(false)
   // startRecording() is in flight: the microphone may open after the user has left.
   const startingRef = useRef(false)
+  // The microphone failed while it was still opening: `start` must not report it as recording.
+  const abortedRef = useRef(false)
   const mountedRef = useRef(true)
+  const onRecordedRef = useRef(onRecorded)
+  useEffect(() => {
+    onRecordedRef.current = onRecorded
+  })
+
+  useEffect(() => {
+    onRecordingChange?.(recording)
+  }, [recording, onRecordingChange])
+  // Stopping usually starts a transcription, which replaces this component before its own
+  // "not recording" update lands: say it on the way out.
+  const onRecordingChangeRef = useRef(onRecordingChange)
+  useEffect(() => {
+    onRecordingChangeRef.current = onRecordingChange
+  })
+  useEffect(() => () => onRecordingChangeRef.current?.(false), [])
 
   useEffect(() => {
     if (!recording) return
@@ -42,15 +62,18 @@ export function Recorder({
     }
   }, [recording])
 
-  // Leaving the screen mid-recording releases the microphone. If it is still opening,
-  // `start` releases it as soon as it opens.
+  // Leaving the screen mid-recording keeps what was said: the recording is saved and transcribed
+  // in the background (the job outlives the page), and the microphone is released. If it is
+  // still opening, `start` releases it as soon as it opens.
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
       if (recordingRef.current) {
         recordingRef.current = false
-        stopRecording().catch(() => {})
+        stopRecording()
+          .then((result) => onRecordedRef.current(result.tempAudioPath, result.durationMs))
+          .catch(() => {})
       }
     }
   }, [])
@@ -58,6 +81,7 @@ export function Recorder({
   // The microphone failed or was unplugged: the backend ended the recording.
   const handleMicError = useEffectEvent((message: string) => {
     if (!recordingRef.current && !startingRef.current) return
+    if (startingRef.current) abortedRef.current = true
     recordingRef.current = false
     setRecording(false)
     setLevels(silence())
@@ -82,10 +106,12 @@ export function Recorder({
     setBusy(true)
     setMicError(null)
     startingRef.current = true
+    abortedRef.current = false
     try {
       await startRecording()
-      if (!mountedRef.current) {
-        // The user left while the microphone was opening.
+      if (!mountedRef.current || abortedRef.current) {
+        // The user left while the microphone was opening, or it failed on the way (the error
+        // is already on screen).
         stopRecording().catch(() => {})
         return
       }

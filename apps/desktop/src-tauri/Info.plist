@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app's generated Info.plist by tauri build. Without a usage description macOS
+     never shows the microphone prompt, and recording gets silence or ends the app. -->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Talkr records your voice to turn it into text. Recordings are processed on this Mac and never uploaded.</string>
+</dict>
+</plist>

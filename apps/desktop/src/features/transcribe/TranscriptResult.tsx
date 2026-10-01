@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Button, Card, Segmented } from '@/components/ui'
-import { historyExport, parseSegments } from '@/lib/api'
-import type { ExportFormat, HistoryItem } from '@/lib/types'
-import { toast, toastError } from '@/stores/toast'
+import { parseSegments } from '@/lib/api'
+import type { HistoryItem } from '@/lib/types'
+import { toastError } from '@/stores/toast'
+import { ExportMenu } from '@/features/export/ExportMenu'
 import { formatDuration, formatSeconds } from '@/features/speak/utils'
 import { formatTimestamp, languageName } from './utils'
 
@@ -31,15 +32,6 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
     }
   }
 
-  const exportAs = async (format: ExportFormat) => {
-    try {
-      const saved = await historyExport({ id: item.id, format })
-      if (saved) toast(`Saved as ${format.toUpperCase()}`)
-    } catch (err) {
-      toastError(err)
-    }
-  }
-
   return (
     <Card className="animate-rise overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
@@ -57,12 +49,7 @@ export function TranscriptResult({ item, name }: { item: HistoryItem; name: stri
           >
             {copied ? 'Copied' : 'Copy text'}
           </Button>
-          <Button size="sm" disabled={empty} onClick={() => void exportAs('txt')}>
-            TXT
-          </Button>
-          <Button size="sm" disabled={segments.length === 0} onClick={() => void exportAs('srt')}>
-            SRT
-          </Button>
+          {empty ? null : <ExportMenu item={item} prefer="text" />}
         </div>
       </div>
 

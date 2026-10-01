@@ -291,41 +291,47 @@ fn run_synthesis(
 
     let paths = &state.paths;
     let audio_path = paths.audio_path("wav");
-    let make_op = |_gpu: bool| {
-        Op::Synthesize(SynthesizeJob {
-            model: model.clone(),
+    let synthesize = || -> Result<HistoryItem> {
+        let make_op = |_gpu: bool| {
+            Op::Synthesize(SynthesizeJob {
+                model: model.clone(),
+                text: text.to_string(),
+                voice_id: voice_id.to_string(),
+                speed,
+                out_path: audio_path.clone(),
+            })
+        };
+        let (duration_ms, device) = match state.engine.run(job_id, &make_op, false, &progress)? {
+            Event::Synthesized { duration_ms, device, .. } => (duration_ms, device),
+            Event::Failed { kind, error, .. } => return Err(failure_to_error(kind, error)),
+            other => return Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
+        };
+
+        let item = HistoryItem {
+            id: job_id.to_string(),
+            kind: HistoryKind::Tts,
+            created_at: Utc::now().timestamp_millis(),
+            title: make_title(text),
             text: text.to_string(),
-            voice_id: voice_id.to_string(),
-            speed,
-            out_path: audio_path.clone(),
-        })
+            audio_path: Some(to_stored_path(paths, &audio_path)),
+            duration_ms: Some(duration_ms),
+            model_id: model_id.to_string(),
+            voice_id: Some(voice_id.to_string()),
+            language: None,
+            device,
+            processing_ms: start.elapsed().as_millis() as i64,
+            favorite: false,
+            segments_json: None,
+        };
+        insert_history(paths, &item)?;
+        Ok(item)
     };
-    let (duration_ms, device) = match state.engine.run(job_id, &make_op, false, &progress)? {
-        Event::Synthesized { duration_ms, device, .. } => (duration_ms, device),
-        Event::Failed { kind, error, .. } => return Err(failure_to_error(kind, error)),
-        other => return Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
-    };
-    let title = make_title(text);
-
-    let item = HistoryItem {
-        id: job_id.to_string(),
-        kind: HistoryKind::Tts,
-        created_at: Utc::now().timestamp_millis(),
-        title,
-        text: text.to_string(),
-        audio_path: Some(to_stored_path(paths, &audio_path)),
-        duration_ms: Some(duration_ms),
-        model_id: model_id.to_string(),
-        voice_id: Some(voice_id.to_string()),
-        language: None,
-        device,
-        processing_ms: start.elapsed().as_millis() as i64,
-        favorite: false,
-        segments_json: None,
-    };
-
-    insert_history(paths, &item)?;
-    Ok(item)
+    let result = synthesize();
+    if result.is_err() {
+        // Cancelled, failed, or not saved to history: nothing will ever point at this file.
+        let _ = std::fs::remove_file(&audio_path);
+    }
+    result
 }
 
 pub(crate) fn make_title(text: &str) -> String {

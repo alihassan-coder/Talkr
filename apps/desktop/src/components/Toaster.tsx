@@ -5,6 +5,8 @@ import { cx } from '@/lib/cx'
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts)
   const dismiss = useToasts((s) => s.dismiss)
+  const pause = useToasts((s) => s.pause)
+  const resume = useToasts((s) => s.resume)
 
   return (
     <div aria-live="polite" className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-80 flex-col gap-2">
@@ -12,6 +14,10 @@ export function Toaster() {
         <div
           key={t.id}
           role={t.tone === 'error' ? 'alert' : 'status'}
+          onMouseEnter={() => pause(t.id)}
+          onMouseLeave={() => resume(t.id)}
+          onFocus={() => pause(t.id)}
+          onBlur={() => resume(t.id)}
           className={cx(
             'pointer-events-auto flex animate-rise items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-[var(--shadow-pop)]',
             t.tone === 'error' ? 'border-line-strong bg-surface text-fg' : 'border-line bg-surface text-fg',

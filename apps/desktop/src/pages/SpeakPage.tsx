@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
+import type { ClipboardEvent } from 'react'
 import { useNavigate } from 'react-router'
-import { AudioLines, Download, Volume2, X } from 'lucide-react'
+import { AudioLines, Volume2, X } from 'lucide-react'
 import { Button, Card, EmptyState, Kbd, PageHeader, Progress } from '@/components/ui'
 import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import {
   getSettings,
-  historyExport,
   historyList,
   isTauri,
   listInstalledModels,
@@ -17,12 +17,15 @@ import type { HistoryItem, InstalledModel, Voice } from '@/lib/types'
 import { errorText } from '@/lib/errors'
 import { useJobs } from '@/stores/jobs'
 import { toast, toastError } from '@/stores/toast'
+import { useDrafts } from '@/stores/drafts'
+import { modKey } from '@/lib/platform'
+import { ExportMenu } from '@/features/export/ExportMenu'
 import { AudioPlayer } from '@/features/speak/AudioPlayer'
 import { PreviewNotice } from '@/features/speak/PreviewNotice'
 import { RecentList } from '@/features/speak/RecentList'
 import { SpeedControl } from '@/features/speak/SpeedControl'
 import { useJob } from '@/features/speak/useJob'
-import { formatDuration, formatSeconds, MAX_CHARS } from '@/features/speak/utils'
+import { countWords, estimateSpeechMs, formatDuration, formatSeconds, MAX_CHARS } from '@/features/speak/utils'
 
 const fetchRecent = () => historyList({ kind: 'tts' }).then((r) => r.items.slice(0, 5))
 
@@ -36,9 +39,11 @@ export function SpeakPage() {
   const [voices, setVoices] = useState<Voice[] | null>(null)
   const [voiceId, setVoiceId] = useState('')
   const [speed, setSpeed] = useState(1)
-  const [text, setText] = useState('')
-  // A recent item the user picked; `afterSeq` is the job result it was picked after.
-  const [picked, setPicked] = useState<{ item: HistoryItem; afterSeq: number } | null>(null)
+  const text = useDrafts((s) => s.speakText)
+  const setText = useDrafts((s) => s.setSpeakText)
+  // A recent item the user picked; `afterSeq` is the job result it was picked after, `nonce`
+  // tells picks apart so picking the same item again plays it again.
+  const [picked, setPicked] = useState<{ item: HistoryItem; afterSeq: number; nonce: number } | null>(null)
   const [recent, setRecent] = useState<HistoryItem[]>([])
   const [recentError, setRecentError] = useState<string | null>(null)
   const [recentReload, setRecentReload] = useState(0)
@@ -48,6 +53,9 @@ export function SpeakPage() {
   const job = useJob('tts')
   const [mountSeq] = useState(() => useJobs.getState().tts.result?.seq ?? 0)
   const resultSeq = job.result?.seq ?? 0
+
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     if (!tauri) return
@@ -63,13 +71,20 @@ export function SpeakPage() {
       })
       .catch((err: unknown) => {
         if (!alive) return
+        // Not "nothing installed": that would send people off to download what they have.
+        setLoadError(errorText(err))
         setModels([])
-        toastError(err)
       })
     return () => {
       alive = false
     }
-  }, [tauri])
+  }, [tauri, loadAttempt])
+
+  const retryLoad = () => {
+    setLoadError(null)
+    setModels(null)
+    setLoadAttempt((n) => n + 1)
+  }
 
   // Recent items: on open, after every finished job, and on Retry.
   useEffect(() => {
@@ -111,7 +126,9 @@ export function SpeakPage() {
     }
   }, [modelId, defaultVoice])
 
-  const canGenerate = tauri && text.trim().length > 0 && !!modelId && !!voiceId && !job.running && !job.blockedBy
+  // The voice must belong to the loaded list: right after a model switch the old voice is gone.
+  const voiceReady = !!voices && voices.some((v) => v.id === voiceId)
+  const canGenerate = tauri && text.trim().length > 0 && !!modelId && voiceReady && !job.running && !job.blockedBy
 
   const generate = () => {
     if (!canGenerate) return
@@ -123,12 +140,13 @@ export function SpeakPage() {
     setModelId(id)
   }
 
-  const saveWav = async (item: HistoryItem) => {
-    try {
-      const saved = await historyExport({ id: item.id, format: 'wav' })
-      if (saved) toast('Saved as WAV')
-    } catch (err) {
-      toastError(err)
+  // maxLength would cut a long paste silently; say what happened.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const box = e.currentTarget
+    const pasted = e.clipboardData.getData('text').length
+    const kept = text.length - (box.selectionEnd - box.selectionStart)
+    if (kept + pasted > MAX_CHARS) {
+      toast(`Only the first ${MAX_CHARS.toLocaleString('en-US')} characters fit. Split longer text into parts.`)
     }
   }
 
@@ -137,6 +155,25 @@ export function SpeakPage() {
       <div className="space-y-8">
         <Header />
         <Progress value={null} label="Loading" className="mx-auto max-w-40" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-8">
+        <Header />
+        <Notice
+          tone="error"
+          title="Could not load your installed models"
+          action={
+            <Button size="sm" onClick={retryLoad}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Notice>
       </div>
     )
   }
@@ -163,7 +200,7 @@ export function SpeakPage() {
     job.result && (!picked || job.result.seq > picked.afterSeq)
       ? { item: job.result.item, autoPlay: job.result.seq > mountSeq }
       : picked
-        ? { item: picked.item, autoPlay: true }
+        ? { item: picked.item, autoPlay: true, nonce: picked.nonce }
         : null
   const currentItem = current?.item ?? null
 
@@ -174,11 +211,12 @@ export function SpeakPage() {
       {tauri ? null : <PreviewNotice>Preview mode. Speech is generated in the Talkr desktop app.</PreviewNotice>}
 
       <div className="space-y-4">
-        <Card className="transition-colors duration-200 focus-within:border-line-strong">
+        <Card className="transition-[border-color,box-shadow] duration-200 focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_14%,transparent)]">
           <textarea
             value={text}
             dir="auto"
             onChange={(e) => setText(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault()
@@ -193,6 +231,12 @@ export function SpeakPage() {
           <div className="flex items-center justify-between px-4 pb-3 pl-6">
             <span className="font-mono text-[11px] tabular-nums text-subtle">
               {text.length.toLocaleString('en-US')} / {MAX_CHARS.toLocaleString('en-US')}
+              {text.trim() ? (
+                <span className="hidden sm:inline">
+                  {' '}
+                  · {countWords(text).toLocaleString('en-US')} words · about {formatDuration(estimateSpeechMs(text, speed))}
+                </span>
+              ) : null}
             </span>
             <Button
               variant="ghost"
@@ -235,7 +279,7 @@ export function SpeakPage() {
               </span>
             ) : null}
             <span className="hidden text-[12px] text-subtle md:inline">
-              <Kbd>Ctrl ⏎</Kbd>
+              <Kbd>{modKey()} ⏎</Kbd>
             </span>
             <Button
               variant="primary"
@@ -277,7 +321,7 @@ export function SpeakPage() {
 
       {currentItem?.audioPath ? (
         <AudioPlayer
-          key={currentItem.id}
+          key={`${currentItem.id}-${current && 'nonce' in current ? current.nonce : 0}`}
           id={currentItem.id}
           path={currentItem.audioPath}
           seed={currentItem.text.length}
@@ -287,16 +331,8 @@ export function SpeakPage() {
           meta={[currentItem.voiceId, currentItem.modelId, `${currentItem.text.length} characters`]
             .filter(Boolean)
             .join(' · ')}
-          footer={`Rendered in ${formatSeconds(currentItem.processingMs)} · ${formatDuration(currentItem.durationMs ?? 0)} of audio · WAV`}
-          actions={
-            <Button
-              size="sm"
-              icon={<Download className="size-3.5" strokeWidth={2} />}
-              onClick={() => void saveWav(currentItem)}
-            >
-              Save as WAV
-            </Button>
-          }
+          footer={`Rendered in ${formatSeconds(currentItem.processingMs)} · ${formatDuration(currentItem.durationMs ?? 0)} of audio`}
+          actions={<ExportMenu item={currentItem} />}
         />
       ) : null}
 
@@ -317,7 +353,7 @@ export function SpeakPage() {
       <RecentList
         items={recent}
         activeId={currentItem?.id ?? null}
-        onSelect={(item) => setPicked({ item, afterSeq: resultSeq })}
+        onSelect={(item) => setPicked((prev) => ({ item, afterSeq: resultSeq, nonce: (prev?.nonce ?? 0) + 1 }))}
       />
     </div>
   )

@@ -4,6 +4,7 @@ import { Pause, Play } from 'lucide-react'
 import { Card } from '@/components/ui'
 import { Waveform } from '@/components/Waveform'
 import { speechBars } from '@/lib/waveform'
+import { nextSpeed, play, speedLabel } from '@/lib/playback'
 import { toastError } from '@/stores/toast'
 import { useAudioUrl } from '@/lib/useAudioUrl'
 import { formatDuration } from './utils'
@@ -38,6 +39,7 @@ export function AudioPlayer({
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(fallbackDurationMs / 1000)
+  const [speed, setSpeed] = useState(1)
 
   // Smooth playhead while playing; timeupdate alone only fires ~4 times a second.
   useEffect(() => {
@@ -61,8 +63,14 @@ export function AudioPlayer({
   const toggle = () => {
     const audio = audioRef.current
     if (!audio) return
-    if (audio.paused) audio.play().catch(toastError)
+    if (audio.paused) play(audio).catch(toastError)
     else audio.pause()
+  }
+
+  const changeSpeed = () => {
+    const next = nextSpeed(speed)
+    setSpeed(next)
+    if (audioRef.current) audioRef.current.playbackRate = next
   }
 
   const seekTo = (seconds: number) => {
@@ -135,8 +143,17 @@ export function AudioPlayer({
                 <span className="pointer-events-none absolute -inset-y-1.5 w-px bg-accent" style={{ left: `${ratio * 100}%` }} />
               ) : null}
             </div>
-            <div className="mt-2 flex justify-between font-mono text-[10.5px] tabular-nums text-subtle">
+            <div className="mt-2 flex items-center justify-between font-mono text-[10.5px] tabular-nums text-subtle">
               <span>{formatDuration(time * 1000)}</span>
+              <button
+                type="button"
+                onClick={changeSpeed}
+                aria-label={`Playback speed ${speedLabel(speed)}`}
+                title="Playback speed"
+                className="rounded-md px-1.5 py-0.5 transition-colors hover:bg-fg/[0.06] hover:text-fg"
+              >
+                {speedLabel(speed)}
+              </button>
               <span>{formatDuration(duration * 1000)}</span>
             </div>
           </div>
@@ -150,7 +167,10 @@ export function AudioPlayer({
         src={url ?? undefined}
         autoPlay={autoPlay}
         preload="metadata"
-        onPlay={() => setPlaying(true)}
+        onPlay={(e) => {
+          e.currentTarget.playbackRate = speed
+          setPlaying(true)
+        }}
         onPause={() => setPlaying(false)}
         onEnded={(e) => {
           setPlaying(false)

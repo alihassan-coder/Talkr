@@ -5,9 +5,10 @@
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use talkr_protocol::{
     from_line, to_line, Device, Event, FailureKind, ModelRef, Op, Request, SynthesizeJob, TranscribeJob, Transcript,
     Voice,
@@ -39,7 +40,30 @@ pub trait Engines {
 }
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
-type CancelFlags = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
+
+/// How often the heartbeat speaks for a job that is working but has no new progress to report.
+/// whisper.cpp reports every 5 % of the audio, which on a slow CPU and a long file can be many
+/// minutes apart; the app restarts an engine it has not heard from in 10 minutes.
+pub const HEARTBEAT: Duration = Duration::from_secs(20);
+
+/// The job on the job thread, as the heartbeat sees it.
+struct RunningJob {
+    id: String,
+    /// Grows while the engine calls back (see `JobControl::alive`).
+    alive: Arc<AtomicU64>,
+    /// The last progress reported, as `f32` bits.
+    progress: Arc<AtomicU32>,
+}
+
+/// Jobs accepted and not answered yet. Lock order: this table, then the output writer.
+#[derive(Default)]
+struct Jobs {
+    /// Cancel flags of queued and running jobs.
+    flags: HashMap<String, Arc<AtomicBool>>,
+    running: Option<RunningJob>,
+}
+
+type JobTable = Arc<Mutex<Jobs>>;
 
 fn send(out: &Writer, event: &Event) {
     let mut out = out.lock().unwrap_or_else(|e| e.into_inner());
@@ -55,20 +79,38 @@ where
     W: Write + Send + 'static,
     E: Engines + Send + 'static,
 {
+    serve_with(input, output, engines, HEARTBEAT)
+}
+
+fn serve_with<R, W, E>(input: R, output: W, engines: E, heartbeat: Duration)
+where
+    R: BufRead,
+    W: Write + Send + 'static,
+    E: Engines + Send + 'static,
+{
     let out: Writer = Arc::new(Mutex::new(Box::new(output)));
-    let flags: CancelFlags = Arc::default();
+    let table: JobTable = Arc::default();
     send(&out, &Event::Ready { version: env!("CARGO_PKG_VERSION").into() });
 
     let (jobs_tx, jobs_rx) = mpsc::channel::<Request>();
     let job_thread = {
         let out = out.clone();
-        let flags = flags.clone();
+        let table = table.clone();
         std::thread::Builder::new()
             .name("talkr-engine-job".into())
             // whisper.cpp and onnxruntime use deep native stacks; don't rely on the platform default.
             .stack_size(8 << 20)
-            .spawn(move || run_jobs(jobs_rx, engines, &out, &flags))
+            .spawn(move || run_jobs(jobs_rx, engines, &out, &table))
             .expect("spawn the engine job thread")
+    };
+    let (stop_heartbeat, heartbeat_stopped) = mpsc::channel::<()>();
+    let heartbeat_thread = {
+        let out = out.clone();
+        let table = table.clone();
+        std::thread::Builder::new()
+            .name("talkr-engine-heartbeat".into())
+            .spawn(move || beat(&table, &out, &heartbeat_stopped, heartbeat))
+            .expect("spawn the engine heartbeat thread")
     };
 
     for line in input.lines() {
@@ -84,13 +126,9 @@ where
             }
         };
         match request.op {
-            Op::Cancel => {
-                if let Some(flag) = lock(&flags).get(&request.id) {
-                    flag.store(true, Ordering::Relaxed);
-                }
-            }
+            Op::Cancel => cancel(&table, &out, request.id),
             _ => {
-                lock(&flags).insert(request.id.clone(), Arc::new(AtomicBool::new(false)));
+                lock(&table).flags.insert(request.id.clone(), Arc::new(AtomicBool::new(false)));
                 if jobs_tx.send(request).is_err() {
                     break;
                 }
@@ -99,27 +137,76 @@ where
     }
 
     // The app closed our stdin: stop whatever is running and leave.
-    for flag in lock(&flags).values() {
+    for flag in lock(&table).flags.values() {
         flag.store(true, Ordering::Relaxed);
     }
     drop(jobs_tx);
     let _ = job_thread.join();
+    drop(stop_heartbeat);
+    let _ = heartbeat_thread.join();
+}
+
+/// Cancel job `id`. A running job is flagged and answers once it notices. A queued job is
+/// answered right here and dropped from the table, so the app is not kept waiting behind the
+/// job ahead of it, and never mistakes that job for one that ignores its cancellation.
+fn cancel(table: &JobTable, out: &Writer, id: String) {
+    let mut jobs = lock(table);
+    let running = jobs.running.as_ref().is_some_and(|r| r.id == id);
+    if running {
+        if let Some(flag) = jobs.flags.get(&id) {
+            flag.store(true, Ordering::Relaxed);
+        }
+    } else if jobs.flags.remove(&id).is_some() {
+        send(out, &Event::Failed { id, kind: FailureKind::Cancelled, error: EngineError::Cancelled.to_string() });
+    }
+}
+
+/// Speak for the running job every `every` while its engine keeps calling back, by repeating its
+/// last progress. Silence from an engine that stopped calling back is left for the app's
+/// watchdog to notice.
+fn beat(table: &JobTable, out: &Writer, stop: &mpsc::Receiver<()>, every: Duration) {
+    let mut seen: Option<(String, u64)> = None;
+    while let Err(mpsc::RecvTimeoutError::Timeout) = stop.recv_timeout(every) {
+        let jobs = lock(table);
+        let Some(job) = &jobs.running else {
+            seen = None;
+            continue;
+        };
+        let count = job.alive.load(Ordering::Relaxed);
+        let advanced = seen.as_ref().is_some_and(|(id, last)| *id == job.id && *last != count);
+        if advanced {
+            let progress = f32::from_bits(job.progress.load(Ordering::Relaxed));
+            send(out, &Event::Progress { id: job.id.clone(), progress });
+        }
+        seen = Some((job.id.clone(), count));
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn run_jobs<E: Engines>(jobs: mpsc::Receiver<Request>, mut engines: E, out: &Writer, flags: &CancelFlags) {
+fn run_jobs<E: Engines>(jobs: mpsc::Receiver<Request>, mut engines: E, out: &Writer, table: &JobTable) {
     for request in jobs {
         let id = request.id.clone();
-        let cancel = lock(flags).get(&id).cloned().unwrap_or_default();
-        let progress_out = out.clone();
-        let progress_id = id.clone();
-        let ctl = JobControl::new(
-            Arc::new(move |progress| send(&progress_out, &Event::Progress { id: progress_id.clone(), progress })),
-            cancel,
-        );
+        let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+        let ctl = {
+            let mut jobs = lock(table);
+            // No flag: it was cancelled while queued, and `cancel` has answered it already.
+            let Some(cancel) = jobs.flags.get(&id).cloned() else { continue };
+            let progress_out = out.clone();
+            let progress_id = id.clone();
+            let last_progress = progress.clone();
+            let ctl = JobControl::new(
+                Arc::new(move |p: f32| {
+                    last_progress.store(p.to_bits(), Ordering::Relaxed);
+                    send(&progress_out, &Event::Progress { id: progress_id.clone(), progress: p })
+                }),
+                cancel,
+            );
+            jobs.running = Some(RunningJob { id: id.clone(), alive: ctl.alive(), progress });
+            ctl
+        };
 
         let event = match catch_unwind(AssertUnwindSafe(|| handle(&mut engines, &request, &ctl))) {
             Ok(Ok(event)) => event,
@@ -130,7 +217,12 @@ fn run_jobs<E: Engines>(jobs: mpsc::Receiver<Request>, mut engines: E, out: &Wri
                 Event::Failed { id: id.clone(), kind: FailureKind::Engine, error: panic_message(panic) }
             }
         };
-        lock(flags).remove(&id);
+        {
+            // Off the table before the answer goes out, so no heartbeat follows it.
+            let mut jobs = lock(table);
+            jobs.flags.remove(&id);
+            jobs.running = None;
+        }
         send(out, &event);
     }
 }
@@ -190,7 +282,8 @@ impl NativeEngines {
     }
 
     fn tts(&mut self, model: &ModelRef) -> Result<&SherpaTtsEngine> {
-        if !self.tts.as_ref().is_some_and(|e| e.model_id() == model.model_id) {
+        // Thread count is fixed when onnxruntime loads the model, so a changed setting reloads it.
+        if !self.tts.as_ref().is_some_and(|e| e.model_id() == model.model_id && e.threads() == model.threads) {
             self.tts = None;
             self.stt = None;
             self.tts = Some(SherpaTtsEngine::new(&model.dir, model.model_id.clone(), model.threads)?);
@@ -278,6 +371,24 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(5));
                 },
                 "panic" => panic!("boom"),
+                // Working for a while: one progress report, then only cancellation checks.
+                "busy" => {
+                    ctl.progress(0.25);
+                    for _ in 0..60 {
+                        ctl.check_cancelled()?;
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Ok(Transcribed {
+                        transcript: Transcript { text: "busy".into(), segments: vec![], language: None },
+                        audio_ms: 10,
+                        device: "cpu".into(),
+                    })
+                }
+                // Stuck in native code: no callbacks at all.
+                "hung" => {
+                    std::thread::sleep(Duration::from_millis(300));
+                    Err(EngineError::Engine("gave up".into()))
+                }
                 "oom" => Err(EngineError::OutOfMemory("no memory".into())),
                 _ => {
                     ctl.progress(0.5);
@@ -366,10 +477,15 @@ mod tests {
     /// Feed `input`, keep stdin open until `finals` jobs have answered (closing it cancels
     /// whatever is still running), then close it.
     fn run(input: &str, engines: FakeEngines, finals: usize) -> Vec<Event> {
+        run_beating(input, engines, finals, HEARTBEAT)
+    }
+
+    fn run_beating(input: &str, engines: FakeEngines, finals: usize, heartbeat: Duration) -> Vec<Event> {
         let (tx, rx) = mpsc::channel();
         let sink = Sink::default();
         let out = sink.clone();
-        let server = std::thread::spawn(move || serve(BufReader::new(Pipe(rx, vec![])), out, engines));
+        let server =
+            std::thread::spawn(move || serve_with(BufReader::new(Pipe(rx, vec![])), out, engines, heartbeat));
         tx.send(input.as_bytes().to_vec()).unwrap();
         for _ in 0..1000 {
             if sink.events().iter().filter(|e| e.is_final()).count() >= finals {
@@ -451,6 +567,57 @@ mod tests {
         drop(tx);
         server.join().unwrap();
         assert!(matches!(sink.events().last().unwrap(), Event::Failed { kind: FailureKind::Cancelled, .. }));
+    }
+
+    #[test]
+    fn cancelling_a_queued_job_answers_at_once_and_leaves_the_running_one_alone() {
+        let (tx, rx) = mpsc::channel();
+        let sink = Sink::default();
+        let out = sink.clone();
+        let server = std::thread::spawn(move || serve(BufReader::new(Pipe(rx, vec![])), out, FakeEngines::default()));
+
+        tx.send((transcribe("running", "wait") + &transcribe("queued", "ok")).into_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        tx.send(to_line(&Request { id: "queued".into(), op: Op::Cancel }).into_bytes()).unwrap();
+        let answer = sink.wait_for(|e| e.is_final());
+        assert!(
+            matches!(&answer, Event::Failed { id, kind: FailureKind::Cancelled, .. } if id == "queued"),
+            "{answer:?}"
+        );
+        // The running job was not touched: it is still going.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(sink.events().iter().filter(|e| e.is_final()).count(), 1);
+
+        tx.send(to_line(&Request { id: "running".into(), op: Op::Cancel }).into_bytes()).unwrap();
+        sink.wait_for(|e| matches!(e, Event::Failed { id, .. } if id == "running"));
+        tx.send(transcribe("next", "ok").into_bytes()).unwrap();
+        sink.wait_for(|e| matches!(e, Event::Transcribed { id, .. } if id == "next"));
+        drop(tx);
+        server.join().unwrap();
+
+        // The cancelled job never ran, and nothing answered it twice.
+        let events = sink.events();
+        assert!(!events.iter().any(|e| matches!(e, Event::Transcribed { id, .. } if id == "queued")));
+        assert_eq!(events.iter().filter(|e| e.is_final() && e.id() == Some("queued")).count(), 1);
+    }
+
+    #[test]
+    fn the_heartbeat_speaks_for_a_working_job() {
+        let events = run_beating(&transcribe("long", "busy"), FakeEngines::default(), 1, Duration::from_millis(20));
+        let beats = events
+            .iter()
+            .filter(|e| matches!(e, Event::Progress { id, progress } if id == "long" && *progress == 0.25))
+            .count();
+        // One real report, then heartbeats repeating it.
+        assert!(beats >= 3, "{events:?}");
+        assert!(matches!(events.last().unwrap(), Event::Transcribed { id, .. } if id == "long"));
+    }
+
+    #[test]
+    fn the_heartbeat_stays_quiet_for_a_hung_job() {
+        let events = run_beating(&transcribe("stuck", "hung"), FakeEngines::default(), 1, Duration::from_millis(20));
+        assert!(!events.iter().any(|e| matches!(e, Event::Progress { .. })), "{events:?}");
+        assert!(matches!(events.last().unwrap(), Event::Failed { id, .. } if id == "stuck"));
     }
 
     #[test]

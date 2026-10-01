@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use talkr_protocol::{Transcript, TranscriptSegment};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use crate::{devices, logger, EngineError, JobControl, Result};
@@ -91,11 +92,13 @@ impl WhisperEngine {
         // its trampoline reads the pointer as the closure itself, so every poll read garbage.
         // That showed up as a bogus "failed to encode" (-6) or an access violation that closed
         // the app mid-transcription. Point the C callback straight at the job's cancel flag.
-        let cancel = ctl.cancel_flag();
-        // SAFETY: `cancel` outlives `state.full` below, and the callback only reads the atomic.
+        // ggml calls it on every graph computation, so it also tells the worker's heartbeat that
+        // a long transcription is still working between whisper's 5 % progress reports.
+        let abort = AbortData { cancel: ctl.cancel_flag(), alive: ctl.alive() };
+        // SAFETY: `abort` outlives `state.full` below, and the callback only touches its atomics.
         unsafe {
             params.set_abort_callback(Some(abort_if_cancelled));
-            params.set_abort_callback_user_data(std::sync::Arc::as_ptr(&cancel) as *mut c_void);
+            params.set_abort_callback_user_data(&abort as *const AbortData as *mut c_void);
         }
 
         let result = state.full(params, samples);
@@ -140,8 +143,16 @@ impl WhisperEngine {
     }
 }
 
+/// What whisper.cpp's abort callback reads: the job's cancel flag and its liveness counter.
+struct AbortData {
+    cancel: Arc<AtomicBool>,
+    alive: Arc<AtomicU64>,
+}
+
 unsafe extern "C" fn abort_if_cancelled(user_data: *mut c_void) -> bool {
-    (*(user_data as *const AtomicBool)).load(Ordering::Relaxed)
+    let data = &*(user_data as *const AbortData);
+    data.alive.fetch_add(1, Ordering::Relaxed);
+    data.cancel.load(Ordering::Relaxed)
 }
 
 /// whisper-rs panics on a NUL byte and whisper.cpp rejects unknown codes, so anything that is not

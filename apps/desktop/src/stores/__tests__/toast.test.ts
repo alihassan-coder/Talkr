@@ -20,7 +20,21 @@ describe('toast store', () => {
     expect(useToasts.getState().toasts).toMatchObject([{ message: 'Disk full', tone: 'error' }])
     vi.advanceTimersByTime(3200)
     expect(useToasts.getState().toasts).toHaveLength(1)
-    vi.advanceTimersByTime(2800)
+    vi.advanceTimersByTime(5800)
+    expect(useToasts.getState().toasts).toHaveLength(0)
+  })
+
+  it('holds a toast while it is hovered, then lets it go', () => {
+    toastError('Engine stopped')
+    const id = useToasts.getState().toasts[0]!.id
+    vi.advanceTimersByTime(8000)
+    useToasts.getState().pause(id)
+    vi.advanceTimersByTime(60_000)
+    expect(useToasts.getState().toasts).toHaveLength(1)
+    useToasts.getState().resume(id)
+    vi.advanceTimersByTime(1100)
+    expect(useToasts.getState().toasts).toHaveLength(1)
+    vi.advanceTimersByTime(200)
     expect(useToasts.getState().toasts).toHaveLength(0)
   })
 

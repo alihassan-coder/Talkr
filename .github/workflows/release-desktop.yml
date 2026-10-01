@@ -18,25 +18,77 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Installers are only built from code that passes every test (see ci.yml).
-  ci:
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
-  # Fail in seconds, before hours of builds, when the tag and the version files disagree.
+  # Fail in seconds, before hours of builds, when the tag and the version files disagree, or the
+  # release has no notes in CHANGELOG.md.
   versions:
     name: Versions match the tag
     runs-on: ubuntu-latest
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - run: node scripts/check-versions.mjs
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        run: |
+          {
+            echo 'notes<<TALKR_NOTES_EOF'
+            node scripts/release-notes.mjs
+            echo 'TALKR_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # Installers are only built from code that passed every test. A tag normally points at a
+  # commit CI already tested in full on master; reuse that result instead of running the
+  # 20-minute matrix again. Otherwise (a skipped job, a failure, no run) run CI here.
+  ci-status:
+    name: CI already passed for this commit
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      passed: ${{ steps.status.outputs.passed }}
+    steps:
+      - id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          runs() { gh run list --repo "$REPO" --workflow ci.yml --commit "$SHA" --json databaseId,status,conclusion --jq "$1"; }
+          for attempt in $(seq 1 40); do
+            # A finished, successful run in which no job was skipped (path filters skip Rust jobs
+            # when only other files changed).
+            for id in $(runs '.[] | select(.conclusion == "success") | .databaseId'); do
+              complete=$(gh run view "$id" --repo "$REPO" --json jobs \
+                --jq '[.jobs[] | select(.name != "What changed") | .conclusion] | length > 0 and all(. == "success")')
+              if [ "$complete" = "true" ]; then
+                echo "CI run $id passed every job for $SHA."
+                echo "passed=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+            if [ "$(runs 'map(select(.status != "completed")) | length')" -eq 0 ]; then break; fi
+            echo "CI for $SHA is still running; waiting a minute."
+            sleep 60
+          done
+          echo "No complete, passing CI run for $SHA: running CI as part of the release."
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: ci-status
+    if: needs.ci-status.outputs.passed != 'true'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   build:
     name: ${{ matrix.name }}
-    needs: [versions, ci]
+    needs: [versions, ci-status, ci]
+    # `ci` is skipped when CI already passed for this commit.
+    if: ${{ !cancelled() && needs.versions.result == 'success' && (needs.ci-status.outputs.passed == 'true' || needs.ci.result == 'success') }}
     runs-on: ${{ matrix.os }}
     # tauri-action creates the draft release and uploads installers, signatures and latest.json.
     permissions:
@@ -85,9 +137,10 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: stable
+          toolchain: 1.98.1
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -146,6 +199,10 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Talkr ${{ github.ref_name }}
           releaseBody: |
+            ${{ needs.versions.outputs.notes }}
+
+            ---
+
             Free, private, offline speech tools. Text to speech with Kokoro and Piper, speech to text with Whisper, all running on your own computer.
 
             Speech to text uses your graphics card when it can (Vulkan on Windows and Linux, Metal on macOS) and falls back to the CPU on its own. The engines run in a separate process, so a model that runs out of memory can't take the app down.

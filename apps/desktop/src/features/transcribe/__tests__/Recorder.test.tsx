@@ -22,7 +22,7 @@ describe('Recorder', () => {
     expect(backend.count('stop_recording')).toBe(1)
   })
 
-  it('stops the microphone when the screen is left mid-recording', async () => {
+  it('keeps what was said when the screen is left mid-recording', async () => {
     const backend = mockBackend({ start_recording: null, stop_recording: { tempAudioPath: 'x.wav', durationMs: 1 } })
     const user = userEvent.setup()
     const onRecorded = vi.fn()
@@ -32,7 +32,40 @@ describe('Recorder', () => {
     unmount()
     await flush()
     expect(backend.count('stop_recording')).toBe(1)
-    expect(onRecorded).not.toHaveBeenCalled()
+    // Saved and handed on for transcription instead of thrown away.
+    expect(onRecorded).toHaveBeenCalledWith('x.wav', 1)
+  })
+
+  it('tells the page while it records', async () => {
+    mockBackend({ start_recording: null, stop_recording: { tempAudioPath: 'x.wav', durationMs: 1 } })
+    const user = userEvent.setup()
+    const onRecordingChange = vi.fn()
+    render(<Recorder onRecorded={vi.fn()} onRecordingChange={onRecordingChange} />)
+    await user.click(screen.getByRole('button', { name: 'Start recording' }))
+    await screen.findByRole('button', { name: 'Stop recording' })
+    expect(onRecordingChange).toHaveBeenLastCalledWith(true)
+    await user.click(screen.getByRole('button', { name: 'Stop recording' }))
+    await screen.findByRole('button', { name: 'Start recording' })
+    expect(onRecordingChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('does not pretend to record when the microphone fails while opening', async () => {
+    let opened!: () => void
+    const backend = mockBackend({
+      start_recording: () => new Promise<void>((r) => (opened = () => r())),
+      stop_recording: reject('Not recording'),
+    })
+    const user = userEvent.setup()
+    render(<Recorder onRecorded={vi.fn()} />)
+    await flush()
+    await user.click(screen.getByRole('button', { name: 'Start recording' }))
+    await emitEvent('mic://error', { message: 'No microphone found.' })
+    await act(async () => opened())
+    await flush()
+    expect(screen.getByRole('alert')).toHaveTextContent('No microphone found.')
+    expect(screen.getByRole('button', { name: 'Start recording' })).toBeEnabled()
+    expect(screen.queryByText(/Listening/)).not.toBeInTheDocument()
+    expect(backend.count('stop_recording')).toBeGreaterThanOrEqual(1)
   })
 
   it('leaves the recording state and shows why when the microphone fails', async () => {

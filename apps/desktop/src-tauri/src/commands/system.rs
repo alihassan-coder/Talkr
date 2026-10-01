@@ -1,7 +1,7 @@
 use tauri::{command, ipc::Response, AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use crate::commands::resolve_path;
-use crate::config::{PartialSettings, Settings};
+use crate::config::{DevicePreference, PartialSettings, Settings};
 use crate::db::get_history;
 use crate::error::{AppError, Result};
 use crate::hardware::HardwareInfo;
@@ -114,6 +114,9 @@ pub async fn update_settings(app: AppHandle, settings: PartialSettings) -> Resul
         if updated.device != current.device {
             // A new compute choice deserves a fresh try on the GPU, even after it failed before.
             state.engine.reset_gpu();
+            if updated.device == DevicePreference::Cpu {
+                state.engine.stop_gpu_engine_if_idle();
+            }
         }
         *current = updated.clone();
         Ok(updated)

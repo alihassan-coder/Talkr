@@ -6,7 +6,7 @@ import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import { getSettings, isTauri, listInstalledModels, transcribeFile } from '@/lib/api'
 import type { InstalledModel } from '@/lib/types'
-import { toastError } from '@/stores/toast'
+import { errorText } from '@/lib/errors'
 import { PreviewNotice } from '@/features/speak/PreviewNotice'
 import { useJob } from '@/features/speak/useJob'
 import { formatDuration } from '@/features/speak/utils'
@@ -27,9 +27,13 @@ export function TranscribePage() {
   const [modelId, setModelId] = useState('')
   const [language, setLanguage] = useState('auto')
   const [translate, setTranslate] = useState(false)
+  const [recording, setRecording] = useState(false)
   // The job lives in a store: leaving the page keeps its progress, Cancel and result.
   const job = useJob('stt')
   const result = job.result
+
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     if (!tauri) return
@@ -44,13 +48,20 @@ export function TranscribePage() {
       })
       .catch((err: unknown) => {
         if (!alive) return
+        // Not "nothing installed": that would send people off to download what they have.
+        setLoadError(errorText(err))
         setModels([])
-        toastError(err)
       })
     return () => {
       alive = false
     }
-  }, [tauri])
+  }, [tauri, loadAttempt])
+
+  const retryLoad = () => {
+    setLoadError(null)
+    setModels(null)
+    setLoadAttempt((n) => n + 1)
+  }
 
   const transcribe = (path: string, name: string) => {
     if (!modelId || job.running || job.blockedBy) return
@@ -68,6 +79,7 @@ export function TranscribePage() {
           label="Source"
           value={mode}
           onChange={setMode}
+          disabled={recording}
           options={[
             { value: 'record', label: 'Record' },
             { value: 'file', label: 'File' },
@@ -82,6 +94,25 @@ export function TranscribePage() {
       <div className="space-y-8">
         {header}
         <Progress value={null} label="Loading" className="mx-auto max-w-40" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-8">
+        {header}
+        <Notice
+          tone="error"
+          title="Could not load your installed models"
+          action={
+            <Button size="sm" onClick={retryLoad}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Notice>
       </div>
     )
   }
@@ -152,6 +183,7 @@ export function TranscribePage() {
         </Card>
       ) : mode === 'record' ? (
         <Recorder
+          onRecordingChange={setRecording}
           disabled={(!modelId && tauri) || !!job.blockedBy}
           disabledReason={job.blockedBy}
           onRecorded={(path, durationMs) => transcribe(path, `Recording · ${formatDuration(durationMs)}`)}
