@@ -6,7 +6,7 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
-## Unreleased
+## 0.1.6 - 2026-10-01
 
 ### New
 - Save speech as **MP3**, **FLAC** or **WAV**. Talkr remembers the format you used last.

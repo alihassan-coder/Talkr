@@ -4915,7 +4915,7 @@ dependencies = [
 
 [[package]]
 name = "talkr"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bzip2 0.6.1",
@@ -4953,7 +4953,7 @@ dependencies = [
 
 [[package]]
 name = "talkr-engine"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hound",
  "log",
@@ -4970,7 +4970,7 @@ dependencies = [
 
 [[package]]
 name = "talkr-protocol"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_json",

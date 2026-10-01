@@ -1,4 +1,4 @@
-export const VERSION = '0.1.5'
+export const VERSION = '0.1.6'
 export const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 export const RELEASES_URL = `${REPO_URL}/releases`
 export const ISSUES_URL = `${REPO_URL}/issues`
