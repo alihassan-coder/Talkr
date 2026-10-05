@@ -30,7 +30,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       engine: ${{ steps.filter.outputs.engine }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -59,7 +59,7 @@ jobs:
     name: JS - typecheck, lint, unit tests, builds, web e2e
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
@@ -87,7 +87,7 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Fails on known vulnerabilities; unmaintained/unsound/yanked notices are only printed.
@@ -110,7 +110,7 @@ jobs:
       # macOS engines always have Metal: run the GPU test there too (Apple Silicon runners).
       TALKR_TEST_GPU: ${{ startsWith(matrix.os, 'macos') && '1' || '0' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -183,7 +183,7 @@ jobs:
       # ggml skips CPU-type Vulkan devices such as lavapipe unless they are picked explicitly.
       GGML_VK_VISIBLE_DEVICES: '0'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -246,7 +246,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: macos-15-intel
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
