@@ -82,7 +82,7 @@ const handles = [
   {
     term: 'Telemetry',
     detail:
-      'None. No analytics, no crash reports, no usage statistics. Talkr makes no network connections unless you ask it to download a model.',
+      'None. No analytics, no crash reports, no usage statistics. Talkr goes online only to download a model you pick and to check for updates, which you can turn off.',
   },
   {
     term: 'Source',
@@ -146,7 +146,8 @@ const rights = [
   },
   {
     term: 'Portability.',
-    detail: 'Export any history item as TXT, SRT or WAV. Models are standard GGML and ONNX files.',
+    detail:
+      'Export transcripts as text, Markdown, SRT, WebVTT, CSV or JSON, and speech as MP3, FLAC or WAV. Models are standard GGML and ONNX files.',
   },
   {
     term: 'No profiling.',
@@ -162,7 +163,7 @@ export default function PrivacyPage() {
         <Container>
           <div className="mx-auto max-w-3xl">
             <div className="text-center">
-              <p className="font-mono text-xs text-fg/45">Privacy policy · Updated 29 September 2026</p>
+              <p className="font-mono text-xs text-fg/45">Privacy policy · Updated 5 October 2026</p>
               <h1 className="mt-6 animate-rise text-balance text-5xl font-semibold leading-[0.95] tracking-[-0.045em] motion-reduce:animate-none md:text-7xl">
                 Your voice, your data. <Dim>Your computer.</Dim>
               </h1>
@@ -233,11 +234,16 @@ export default function PrivacyPage() {
               <Section index={4}>
                 <p>
                   Talkr only connects to the internet in two cases: when you click Download on a model, which fetches it
-                  from Hugging Face or GitHub Releases, and when you check for updates, which is off by default.
+                  from Hugging Face or GitHub Releases, and when it checks for a new version.
                 </p>
                 <p>
-                  There is no analytics, no crash reporting and nothing running in the background. Any network monitor
-                  will show you the same.
+                  The update check runs shortly after launch and then every six hours. It downloads one small file
+                  describing the latest release from GitHub Releases and sends nothing about you, your audio or your text.
+                  Like any download, GitHub sees your IP address. Turn it off with Check for updates automatically in
+                  Settings, and use Check now when you want to.
+                </p>
+                <p>
+                  There is no analytics and no crash reporting. Any network monitor will show you the same.
                 </p>
               </Section>
   

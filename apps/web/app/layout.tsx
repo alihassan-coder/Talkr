@@ -1,16 +1,20 @@
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 import { SITE_URL } from '@/lib/site'
 import './globals.css'
 
-const sans = Geist({
-  subsets: ['latin'],
+// Served from the @fontsource packages rather than next/font/google, so a build never depends on
+// reaching Google Fonts (a failed fetch there fails the whole build).
+const sans = localFont({
+  src: '../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2',
+  weight: '100 900',
   variable: '--font-geist-sans',
   display: 'swap',
 })
 
-const mono = Geist_Mono({
-  subsets: ['latin'],
+const mono = localFont({
+  src: '../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2',
+  weight: '100 900',
   variable: '--font-geist-mono',
   display: 'swap',
 })
@@ -28,6 +32,7 @@ export const metadata: Metadata = {
     title: 'Talkr: speech tools that never phone home',
     description: 'Text to speech and speech to text, running entirely on your own machine.',
     type: 'website',
+    url: '/',
     locale: 'en_US',
     siteName: 'Talkr',
   },

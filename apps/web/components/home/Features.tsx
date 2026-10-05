@@ -156,7 +156,7 @@ export function Features() {
           <Tile
             className="md:col-span-4"
             title="Speak"
-            body="Paste a paragraph, a script or a whole chapter. Pick a voice, set the speed, and save the result as a WAV."
+            body="Paste a paragraph, a script or a whole chapter. Pick a voice, set the speed, and save it as MP3, FLAC or WAV."
           >
             <SpeakDemo />
           </Tile>
@@ -184,7 +184,7 @@ export function Features() {
           <Tile
             className="md:col-span-2"
             title="Take it anywhere"
-            body="Export transcripts as TXT or SRT subtitles, and speech as WAV."
+            body="Export transcripts as text, Markdown, SRT or WebVTT subtitles, CSV or JSON, and speech as MP3, FLAC or WAV."
           >
             <ExportDemo />
           </Tile>
