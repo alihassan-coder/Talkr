@@ -52,7 +52,7 @@ export const platforms: Platform[] = [
     detail: 'x86_64',
     requirement: 'Ubuntu 22.04, Debian 12, Fedora 36 or newer (glibc 2.35+)',
     files: [
-      { name: `Talkr_${VERSION}_amd64.AppImage`, format: 'AppImage', arch: 'x86_64', size: '109 MB' },
+      { name: `Talkr_${VERSION}_amd64.AppImage`, format: 'AppImage', arch: 'x86_64', size: '110 MB' },
       { name: `Talkr_${VERSION}_amd64.deb`, format: 'Debian, Ubuntu', arch: 'x86_64', size: '29 MB' },
       { name: `Talkr-${VERSION}-1.x86_64.rpm`, format: 'Fedora, openSUSE', arch: 'x86_64', size: '29 MB' },
     ],
