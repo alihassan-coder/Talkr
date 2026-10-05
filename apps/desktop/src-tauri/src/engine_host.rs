@@ -972,6 +972,7 @@ mod tests {
             audio_path: "a.wav".into(),
             language: None,
             translate: false,
+            decoding: Default::default(),
         })
     }
 

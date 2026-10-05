@@ -68,6 +68,7 @@ export const settingsFixture = (patch: Partial<Settings> = {}): Settings => ({
   defaultVoice: null,
   defaultSttModel: null,
   sttLanguage: 'auto',
+  sttQuality: 'auto',
   speechRate: 1,
   historyRetentionDays: 0,
   saveRecordings: true,

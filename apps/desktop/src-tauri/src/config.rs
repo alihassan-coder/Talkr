@@ -14,6 +14,7 @@ pub struct Settings {
     pub default_voice: Option<String>,
     pub default_stt_model: Option<String>,
     pub stt_language: String,
+    pub stt_quality: SttQuality,
     pub speech_rate: f32,
     pub history_retention_days: u32,
     pub save_recordings: bool,
@@ -25,6 +26,17 @@ pub enum DevicePreference {
     Auto,
     Gpu,
     Cpu,
+}
+
+/// Speed against accuracy for transcription. `Auto` takes the accurate route for imported files
+/// and the fast one for in-app recordings, where the user is waiting on the result.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SttQuality {
+    #[default]
+    Auto,
+    Fast,
+    Accurate,
 }
 
 /// Allowed range for `speechRate`.
@@ -58,6 +70,7 @@ impl Default for Settings {
             default_voice: None,
             default_stt_model: None,
             stt_language: "auto".into(),
+            stt_quality: SttQuality::Auto,
             speech_rate: 1.0,
             history_retention_days: 0,
             save_recordings: true,
@@ -181,6 +194,9 @@ impl Settings {
         if let Some(stt_language) = patch.stt_language {
             self.stt_language = stt_language;
         }
+        if let Some(stt_quality) = patch.stt_quality {
+            self.stt_quality = stt_quality;
+        }
         if let Some(speech_rate) = patch.speech_rate {
             self.speech_rate = speech_rate;
         }
@@ -202,6 +218,7 @@ pub struct PartialSettings {
     pub default_voice: Option<String>,
     pub default_stt_model: Option<String>,
     pub stt_language: Option<String>,
+    pub stt_quality: Option<SttQuality>,
     pub speech_rate: Option<f32>,
     pub history_retention_days: Option<u32>,
     pub save_recordings: Option<bool>,
@@ -312,6 +329,7 @@ mod tests {
         assert_eq!(s.device, DevicePreference::Auto);
         assert_eq!(s.cpu_threads, 0);
         assert_eq!(s.stt_language, "auto");
+        assert_eq!(s.stt_quality, SttQuality::Auto);
         assert_eq!(s.speech_rate, 1.0);
         assert_eq!(s.history_retention_days, 0);
         assert!(s.save_recordings);
@@ -334,6 +352,7 @@ mod tests {
             default_voice: Some("af_heart".into()),
             default_stt_model: Some("whisper-small".into()),
             stt_language: "de".into(),
+            stt_quality: SttQuality::Accurate,
             speech_rate: 1.5,
             history_retention_days: 30,
             save_recordings: false,
@@ -354,6 +373,8 @@ mod tests {
         let s = load(&paths).unwrap();
         assert_eq!(s.device, DevicePreference::Cpu);
         assert_eq!(s.stt_language, "auto");
+        // Files written before sttQuality existed get the default.
+        assert_eq!(s.stt_quality, SttQuality::Auto);
     }
 
     #[test]
@@ -481,10 +502,12 @@ mod tests {
             default_tts_model: Some("piper".into()),
             default_stt_model: Some("whisper".into()),
             stt_language: Some("fr".into()),
+            stt_quality: Some(SttQuality::Fast),
             history_retention_days: Some(7),
             save_recordings: Some(false),
             ..Default::default()
         });
+        assert_eq!(s.stt_quality, SttQuality::Fast);
         assert_eq!(s.cpu_threads, 3);
         assert_eq!(s.default_tts_model.as_deref(), Some("piper"));
         assert_eq!(s.default_stt_model.as_deref(), Some("whisper"));

@@ -48,11 +48,15 @@ export interface Settings {
   defaultSttModel: string | null
   /** 'auto' or an ISO language code */
   sttLanguage: string
+  sttQuality: SttQuality
   speechRate: number
   /** 0 = keep forever */
   historyRetentionDays: number
   saveRecordings: boolean
 }
+
+/** 'auto' = accurate for imported files, fast for in-app recordings. */
+export type SttQuality = 'auto' | 'fast' | 'accurate'
 
 /** Patch for `update_settings`. Omitted (or null) fields are left unchanged. */
 export interface PartialSettings {
@@ -62,6 +66,7 @@ export interface PartialSettings {
   defaultVoice?: string
   defaultSttModel?: string
   sttLanguage?: string
+  sttQuality?: SttQuality
   speechRate?: number
   historyRetentionDays?: number
   saveRecordings?: boolean

@@ -2,9 +2,26 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use talkr_protocol::{Transcript, TranscriptSegment};
+use talkr_protocol::{Decoding, Transcript, TranscriptSegment};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use crate::{devices, logger, EngineError, JobControl, Result};
+
+/// How to run one transcription.
+#[derive(Debug, Clone, Copy)]
+pub struct TranscribeOptions<'a> {
+    pub language: Option<&'a str>,
+    pub translate: bool,
+    pub threads: usize,
+    pub decoding: Decoding,
+}
+
+/// Beam search uses whisper.cpp's CLI default of 5 beams.
+fn sampling(decoding: Decoding) -> SamplingStrategy {
+    match decoding {
+        Decoding::Greedy => SamplingStrategy::Greedy { best_of: 1 },
+        Decoding::Beam => SamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 },
+    }
+}
 
 pub struct WhisperEngine {
     ctx: WhisperContext,
@@ -71,11 +88,12 @@ impl WhisperEngine {
     }
 
     /// Transcribe 16 kHz mono samples.
-    pub fn transcribe(&self, samples: &[f32], language: Option<&str>, translate: bool, threads: usize, ctl: &JobControl) -> Result<Transcript> {
+    pub fn transcribe(&self, samples: &[f32], options: &TranscribeOptions, ctl: &JobControl) -> Result<Transcript> {
+        let TranscribeOptions { language, translate, threads, decoding } = *options;
         logger::take_last_error();
         let mut state = self.ctx.create_state().map_err(|e| self.native_error("prepare", e))?;
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        let mut params = FullParams::new(sampling(decoding));
         params.set_language(Some(sanitize_language(language)));
         params.set_translate(translate);
         params.set_n_threads(threads.max(1) as i32);

@@ -52,6 +52,20 @@ pub struct TranscribeJob {
     /// ISO 639-1 code, or `None`/"auto" to detect.
     pub language: Option<String>,
     pub translate: bool,
+    #[serde(default)]
+    pub decoding: Decoding,
+}
+
+/// How hard whisper searches for the transcript.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Decoding {
+    /// The single most likely word at each step: fastest.
+    #[default]
+    Greedy,
+    /// Keep several candidate transcripts and pick the best: more accurate, about 1.5x slower on
+    /// the CPU (see the engine's `bench_decoding_modes` test).
+    Beam,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,6 +205,7 @@ mod tests {
                     audio_path: "/a.wav".into(),
                     language: Some("en".into()),
                     translate: false,
+                    decoding: Decoding::Beam,
                 }),
             },
             Request {
@@ -221,6 +236,15 @@ mod tests {
         assert_eq!(line, "{\"id\":\"7\",\"op\":\"cancel\"}\n");
         let event: Event = from_line(r#"{"event":"progress","id":"7","progress":0.5}"#).unwrap();
         assert_eq!(event, Event::Progress { id: "7".into(), progress: 0.5 });
+    }
+
+    #[test]
+    fn decoding_defaults_to_greedy() {
+        let line = r#"{"id":"1","op":"transcribe","model":{"modelId":"m","dir":"d","threads":1,"gpu":false},"audioPath":"a.wav","language":null,"translate":false}"#;
+        match from_line::<Request>(line).unwrap().op {
+            Op::Transcribe(job) => assert_eq!(job.decoding, Decoding::Greedy),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

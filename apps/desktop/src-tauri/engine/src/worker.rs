@@ -13,7 +13,7 @@ use talkr_protocol::{
     from_line, to_line, Device, Event, FailureKind, ModelRef, Op, Request, SynthesizeJob, TranscribeJob, Transcript,
     Voice,
 };
-use crate::stt_whisper::WhisperEngine;
+use crate::stt_whisper::{TranscribeOptions, WhisperEngine};
 use crate::tts_sherpa::SherpaTtsEngine;
 use crate::{audio, devices, EngineError, JobControl, Result};
 
@@ -304,7 +304,13 @@ impl Engines for NativeEngines {
         ctl.check_cancelled()?;
         let engine = self.stt(&job.model)?;
         ctl.check_cancelled()?;
-        let transcript = engine.transcribe(&samples, job.language.as_deref(), job.translate, job.model.threads, ctl)?;
+        let options = TranscribeOptions {
+            language: job.language.as_deref(),
+            translate: job.translate,
+            threads: job.model.threads,
+            decoding: job.decoding,
+        };
+        let transcript = engine.transcribe(&samples, &options, ctl)?;
         Ok(Transcribed {
             transcript,
             audio_ms: (samples.len() as i64) * 1000 / 16_000,
@@ -421,7 +427,7 @@ mod tests {
     fn transcribe(id: &str, path: &str) -> String {
         to_line(&Request {
             id: id.into(),
-            op: Op::Transcribe(TranscribeJob { model: model(), audio_path: path.into(), language: None, translate: false }),
+            op: Op::Transcribe(TranscribeJob { model: model(), audio_path: path.into(), language: None, translate: false, decoding: Default::default() }),
         })
     }
 

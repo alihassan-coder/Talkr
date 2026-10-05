@@ -4,10 +4,11 @@ use std::sync::TryLockError;
 use std::time::Duration;
 use chrono::Utc;
 use serde::Serialize;
-use talkr_protocol::{Device, DeviceKind, Event, ModelRef, Op, TranscribeJob};
+use talkr_protocol::{Decoding, Device, DeviceKind, Event, ModelRef, Op, TranscribeJob};
 use tauri::{command, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 use crate::catalog::ModelKind;
+use crate::config::SttQuality;
 use crate::commands::models::locate_model;
 use crate::commands::tts::make_title;
 use crate::commands::{
@@ -191,9 +192,9 @@ pub async fn transcribe_file(
         return Err(AppError::NotFound(format!("Audio file not found: {}", path)));
     }
 
-    let (language, save_recordings) = {
+    let (language, quality, save_recordings) = {
         let settings = state.settings();
-        (language.unwrap_or_else(|| settings.stt_language.clone()), settings.save_recordings)
+        (language.unwrap_or_else(|| settings.stt_language.clone()), settings.stt_quality, settings.save_recordings)
     };
 
     let job_id = Uuid::new_v4().to_string();
@@ -208,6 +209,7 @@ pub async fn transcribe_file(
             model_id: &model_id,
             language: Some(language).filter(|l| !l.is_empty()),
             translate: translate.unwrap_or(false),
+            quality,
             save_recordings,
         };
         let result = catch_panic(|| run_transcription(&job_app, &state, &job, &request));
@@ -222,7 +224,19 @@ struct SttRequest<'a> {
     model_id: &'a str,
     language: Option<String>,
     translate: bool,
+    quality: SttQuality,
     save_recordings: bool,
+}
+
+/// How whisper should search: beam search for `Accurate`, and under `Auto` for imported files;
+/// greedy for `Fast`, and under `Auto` for in-app recordings, where the user is waiting.
+fn decoding_for(quality: SttQuality, own_recording: bool) -> Decoding {
+    match quality {
+        SttQuality::Accurate => Decoding::Beam,
+        SttQuality::Fast => Decoding::Greedy,
+        SttQuality::Auto if own_recording => Decoding::Greedy,
+        SttQuality::Auto => Decoding::Beam,
+    }
 }
 
 fn run_transcription(app: &AppHandle, state: &AppState, job_id: &str, request: &SttRequest) -> Result<HistoryItem> {
@@ -235,12 +249,17 @@ fn run_transcription(app: &AppHandle, state: &AppState, job_id: &str, request: &
     if state.jobs.is_cancelled(job_id) {
         return Err(AppError::Cancelled);
     }
+    let paths = &state.paths;
+    let full_path = request.path;
+    let is_own_recording = is_owned_audio(paths, full_path);
+    let decoding = decoding_for(request.quality, is_own_recording);
     let make_op = |gpu: bool| {
         Op::Transcribe(TranscribeJob {
             model: ModelRef { gpu, ..model.clone() },
             audio_path: request.path.to_path_buf(),
             language: request.language.clone(),
             translate: request.translate,
+            decoding,
         })
     };
     let (transcript, duration_ms, device) = match state.engine.run(job_id, &make_op, gpu, &progress)? {
@@ -248,10 +267,6 @@ fn run_transcription(app: &AppHandle, state: &AppState, job_id: &str, request: &
         Event::Failed { kind, error, .. } => return Err(failure_to_error(kind, error)),
         other => return Err(AppError::Engine(format!("Unexpected reply from the engine: {:?}", other))),
     };
-
-    let paths = &state.paths;
-    let full_path = request.path;
-    let is_own_recording = is_owned_audio(paths, full_path);
 
     // Recordings made in-app are discarded after transcription when the user opted out of keeping
     // them, but only once the transcript is safely in history (below).
@@ -323,6 +338,16 @@ mod tests {
         assert!(weights_in_system_memory(true, false, &[]));
         // Apple Silicon: the GPU shares system memory.
         assert!(weights_in_system_memory(true, true, &discrete));
+    }
+
+    #[test]
+    fn auto_quality_is_accurate_for_files_and_fast_for_recordings() {
+        assert_eq!(decoding_for(SttQuality::Auto, false), Decoding::Beam);
+        assert_eq!(decoding_for(SttQuality::Auto, true), Decoding::Greedy);
+        for own in [false, true] {
+            assert_eq!(decoding_for(SttQuality::Accurate, own), Decoding::Beam);
+            assert_eq!(decoding_for(SttQuality::Fast, own), Decoding::Greedy);
+        }
     }
 
     #[test]

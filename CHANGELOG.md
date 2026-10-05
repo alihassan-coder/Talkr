@@ -6,9 +6,12 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
-## 0.1.6 - 2026-10-01
+## 0.1.6 - 2026-10-05
 
 ### New
+- **Transcription quality** in Settings: Fast, Accurate, or Auto (the default), which is
+  accurate for imported files and fast for recordings made in Talkr. Accurate makes fewer
+  mistakes and takes about 1.5 times as long.
 - Save speech as **MP3**, **FLAC** or **WAV**. Talkr remembers the format you used last.
 - Save transcripts as **plain text, Markdown, SRT or WebVTT subtitles, CSV or JSON**.
 - Update notifications: Talkr checks for new versions at launch and every few hours, shows what

@@ -21,9 +21,10 @@ import type {
   PartialSettings,
   Settings,
   StorageUsage,
+  SttQuality,
   Voice,
 } from '@/lib/types'
-import { Button, EmptyState, PageHeader } from '@/components/ui'
+import { Button, EmptyState, PageHeader, Segmented } from '@/components/ui'
 import { Notice } from '@/components/Notice'
 import { Select } from '@/components/Select'
 import { cx } from '@/lib/cx'
@@ -46,9 +47,22 @@ const defaultSettings: Settings = {
   defaultVoice: null,
   defaultSttModel: null,
   sttLanguage: 'auto',
+  sttQuality: 'auto',
   speechRate: 1,
   historyRetentionDays: 0,
   saveRecordings: true,
+}
+
+const qualityOptions: { value: SttQuality; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'fast', label: 'Fast' },
+  { value: 'accurate', label: 'Accurate' },
+]
+
+const qualityHelp: Record<SttQuality, string> = {
+  auto: 'Accurate for imported files, Fast for recordings made here.',
+  fast: 'Quickest results. Good for clear speech.',
+  accurate: 'Compares several readings of the audio. Fewer mistakes, about 1.5 times slower.',
 }
 
 /**
@@ -411,6 +425,14 @@ export function SettingsPage() {
               ...languages.map(([code, name]) => ({ value: code, label: name })),
               ...(hasLanguageOption ? [] : [{ value: settings.sttLanguage, label: settings.sttLanguage }]),
             ]}
+          />
+        </Row>
+        <Row label="Transcription quality" description={qualityHelp[settings.sttQuality]}>
+          <Segmented
+            label="Transcription quality"
+            value={settings.sttQuality}
+            options={qualityOptions}
+            onChange={(sttQuality) => void save({ sttQuality })}
           />
         </Row>
         <Row label="Speech model" description="Used by Speak unless you pick another.">

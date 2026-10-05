@@ -8,7 +8,7 @@ use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use talkr_protocol::{from_line, to_line, Event, ModelRef, Op, Request, SynthesizeJob, TranscribeJob};
+use talkr_protocol::{from_line, to_line, Decoding, Event, ModelRef, Op, Request, SynthesizeJob, TranscribeJob};
 
 /// What the engine printed on stdout: an event, or a line that is not one (a protocol bug).
 #[derive(Debug)]
@@ -159,9 +159,19 @@ pub fn model(dir: impl Into<PathBuf>, id: &str, gpu: bool) -> ModelRef {
 }
 
 pub fn transcribe(id: &str, model: ModelRef, audio: &Path) -> Request {
+    transcribe_with(id, model, audio, Decoding::Greedy)
+}
+
+pub fn transcribe_with(id: &str, model: ModelRef, audio: &Path, decoding: Decoding) -> Request {
     Request {
         id: id.into(),
-        op: Op::Transcribe(TranscribeJob { model, audio_path: audio.into(), language: Some("en".into()), translate: false }),
+        op: Op::Transcribe(TranscribeJob {
+            model,
+            audio_path: audio.into(),
+            language: Some("en".into()),
+            translate: false,
+            decoding,
+        }),
     }
 }
 

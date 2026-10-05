@@ -17,10 +17,12 @@
 
 mod common;
 
-use common::{model, model_dir, speak, synthesize, test_models, transcribe, Engine, PIPER_LESSAC, WHISPER_TINY_EN};
+use common::{
+    model, model_dir, speak, synthesize, test_models, transcribe, transcribe_with, Engine, PIPER_LESSAC, WHISPER_TINY_EN,
+};
 use std::path::Path;
 use std::time::{Duration, Instant};
-use talkr_protocol::{DeviceKind, Event, FailureKind, Op, Request};
+use talkr_protocol::{Decoding, DeviceKind, Event, FailureKind, Op, Request};
 
 const SENTENCE: &str = "Hello world, this is a test.";
 const LONG: Duration = Duration::from_secs(300);
@@ -161,6 +163,86 @@ fn cancelling_mid_transcription_reports_cancelled() {
     // The engine and the loaded model still work.
     let (_, done) = engine.call(transcribe("again", whisper, &one), LONG);
     assert_heard_the_sentence(&transcript(done, &engine).0);
+}
+
+#[test]
+fn beam_search_transcribes_too() {
+    let Some(models) = test_models("beam_search_transcribes_too") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("hello.wav");
+    let mut engine = Engine::start();
+    speak(&mut engine, &models, SENTENCE, &wav);
+
+    let whisper = model(model_dir(&models, WHISPER_TINY_EN), WHISPER_TINY_EN, false);
+    let (progress, done) = engine.call(transcribe_with("beam", whisper, &wav, Decoding::Beam), LONG);
+    assert_progress_is_sane(&progress);
+    assert_heard_the_sentence(&transcript(done, &engine).0);
+}
+
+/// Speed and word error rate of each decoding mode, on speech of known text. Run it with
+/// `TALKR_BENCH=1` (and `TALKR_TEST_MODELS`; `TALKR_BENCH_MODEL` picks a Whisper model other than
+/// the tiny one) and `--nocapture` to see the table.
+#[test]
+fn bench_decoding_modes() {
+    if std::env::var("TALKR_BENCH").as_deref() != Ok("1") {
+        eprintln!("skipping bench_decoding_modes: set TALKR_BENCH=1");
+        return;
+    }
+    let Some(models) = test_models("bench_decoding_modes") else { return };
+    let whisper_id = std::env::var("TALKR_BENCH_MODEL").unwrap_or_else(|_| WHISPER_TINY_EN.into());
+    let dir = tempfile::tempdir().unwrap();
+    let mut engine = Engine::start();
+
+    let wav = dir.path().join("passage.wav");
+    speak(&mut engine, &models, PASSAGE, &wav);
+    let whisper = model(model_dir(&models, &whisper_id), &whisper_id, false);
+    // Load the model first, so neither mode pays for it.
+    engine.call(transcribe("warm", whisper.clone(), &wav), LONG);
+
+    eprintln!("\n{whisper_id}, {} threads", whisper.threads);
+    eprintln!("{:<8} {:>10} {:>12} {:>8}", "mode", "seconds", "x realtime", "WER");
+    for (name, decoding) in [("greedy", Decoding::Greedy), ("beam", Decoding::Beam)] {
+        let started = Instant::now();
+        let (text, audio_ms, _) = transcript(engine.call(transcribe_with(name, whisper.clone(), &wav, decoding), LONG).1, &engine);
+        let seconds = started.elapsed().as_secs_f64();
+        let wer = word_error_rate(PASSAGE, &text);
+        eprintln!("{name:<8} {seconds:>10.2} {:>12.1} {:>7.1}%", audio_ms as f64 / 1000.0 / seconds, wer * 100.0);
+        eprintln!("         heard: {text}");
+    }
+}
+
+const PASSAGE: &str = "The quick brown fox jumps over the lazy dog. \
+    Please call Stella and ask her to bring these things with her from the store. \
+    Six spoons of fresh snow peas, five thick slabs of blue cheese, and maybe a snack for her brother Bob. \
+    We also need a small plastic snake and a big toy frog for the kids.";
+
+/// Word-level edit distance over the number of reference words, ignoring case and punctuation.
+fn word_error_rate(reference: &str, heard: &str) -> f64 {
+    let words = |s: &str| -> Vec<String> {
+        s.split_whitespace()
+            .map(|w| w.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase())
+            .filter(|w| !w.is_empty())
+            .collect()
+    };
+    let (want, got) = (words(reference), words(heard));
+    let mut row: Vec<usize> = (0..=got.len()).collect();
+    for (i, w) in want.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, g) in got.iter().enumerate() {
+            let substitution = diagonal + usize::from(w != g);
+            diagonal = row[j + 1];
+            row[j + 1] = substitution.min(row[j] + 1).min(row[j + 1] + 1);
+        }
+    }
+    row[got.len()] as f64 / want.len().max(1) as f64
+}
+
+#[test]
+fn word_error_rate_counts_edits_per_reference_word() {
+    assert_eq!(word_error_rate("Hello world, this is a test.", "hello world this is a test"), 0.0);
+    assert_eq!(word_error_rate("one two three four", "one too three"), 0.5);
+    assert_eq!(word_error_rate("one two", "one two three four"), 1.0);
 }
 
 #[test]
