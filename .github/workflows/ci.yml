@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
-    branches: [master]
+    branches: [master, dev]
   # The release workflow runs this when the tagged commit has no passing CI run yet.
   workflow_call:
   # Nightly: the whole matrix (GPU and Intel Mac included), whatever changed.
