@@ -1,6 +1,6 @@
 [package]
 name = "talkr"
-version = "0.1.7"
+version = "0.1.8-1"
 description = "Free, private, offline speech tools"
 authors = ["Talkr Contributors"]
 license = "MIT"

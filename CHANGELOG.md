@@ -6,7 +6,9 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
-## Unreleased
+## 0.1.8-1 - 2026-10-07
+
+Beta: a pre-release for testing dictation. Installed copies are not offered it as an update.
 
 ### New
 - **Dictate anywhere** (Windows): hold Ctrl + Win in any app, speak, and let go; your words are

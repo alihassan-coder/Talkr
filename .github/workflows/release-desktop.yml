@@ -216,7 +216,9 @@ jobs:
             Builds are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper will warn on first launch.
             Checksums are listed in `SHA256SUMS-*.txt`.
           releaseDraft: true
-          prerelease: false
+          # A version with a dash (v0.1.8-1) is a beta: published as a pre-release, which
+          # releases/latest (the updater feed and the website) ignores.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           # latest.json is what installed copies poll (plugins.updater.endpoints); it only becomes
           # visible at releases/latest/download once the draft is published.
           includeUpdaterJson: true

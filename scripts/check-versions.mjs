@@ -39,8 +39,17 @@ const sources = {
 
 const errors = []
 const expected = sources['apps/desktop/src-tauri/tauri.conf.json']
-if (!/^\d+\.\d+\.\d+$/.test(expected ?? '')) errors.push(`tauri.conf.json version "${expected}" is not X.Y.Z`)
+// X.Y.Z, or X.Y.Z-N for a beta (pre-release). Windows' MSI format only allows a number after the dash.
+const prerelease = /^\d+\.\d+\.\d+-\d+$/.test(expected ?? '')
+if (!prerelease && !/^\d+\.\d+\.\d+$/.test(expected ?? '')) {
+  errors.push(`tauri.conf.json version "${expected}" is not X.Y.Z or X.Y.Z-N`)
+}
 for (const [file, version] of Object.entries(sources)) {
+  // The website offers the latest stable release, never a beta.
+  if (prerelease && file === 'apps/web/lib/releases.ts') {
+    if (!/^\d+\.\d+\.\d+$/.test(version)) errors.push(`${file} has ${version}; the website must stay on a stable X.Y.Z`)
+    continue
+  }
   if (version !== expected) errors.push(`${file} has ${version}, tauri.conf.json has ${expected}`)
 }
 
