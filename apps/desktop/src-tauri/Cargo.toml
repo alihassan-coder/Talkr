@@ -27,8 +27,12 @@ tempfile = "3"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = [] }
+tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
+# Dictation lives in the background: one instance only (a second one would install a second
+# keyboard hook and type everything twice), and optionally start with the system.
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2.0"
 tauri-plugin-log = "2.0"
 # Keep major.minor equal to @tauri-apps/plugin-updater and @tauri-apps/plugin-process in package.json.
@@ -60,6 +64,27 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Microphone capture (the engine process does decoding and inference)
 cpal = "0.18"
 hound = { workspace = true }
+
+# System-wide dictation on Windows: the keyboard hook, text insertion (clipboard, SendInput, edit
+# controls) and UI Automation to inspect and verify the focused field. Already in the tree via tao.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_Media_Audio",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

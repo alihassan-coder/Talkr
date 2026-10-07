@@ -53,6 +53,98 @@ export interface Settings {
   /** 0 = keep forever */
   historyRetentionDays: number
   saveRecordings: boolean
+  dictation: DictationSettings
+}
+
+// ---------- dictation ----------
+
+/** A global shortcut: modifiers plus at most one key (a Windows virtual-key code). */
+export interface Shortcut {
+  ctrl: boolean
+  shift: boolean
+  alt: boolean
+  win: boolean
+  key: number | null
+  /** How to show `key`, from the keyboard layout when it was recorded. */
+  keyLabel: string | null
+}
+
+/** auto = hold to talk, tap for hands-free; hold = only while held; toggle = press to start and stop. */
+export type ActivationMode = 'auto' | 'hold' | 'toggle'
+export type InsertMethod = 'auto' | 'paste' | 'type'
+export type AppMethod = 'auto' | 'paste' | 'type' | 'off'
+/** When focus moved during dictation: go back to the starting field, use the current one, or only copy. */
+export type FocusPolicy = 'original' | 'current' | 'copy'
+export type OverlayPosition = 'bottom' | 'top'
+
+export interface Replacement {
+  from: string
+  to: string
+}
+
+export interface AppRule {
+  /** Executable name, lowercase ("slack.exe"). */
+  app: string
+  method: AppMethod
+  /** Added by Talkr after pasting failed and typing worked. */
+  learned: boolean
+}
+
+export interface DictationSettings {
+  enabled: boolean
+  shortcut: Shortcut
+  mode: ActivationMode
+  pasteLastEnabled: boolean
+  pasteLastShortcut: Shortcut
+  /** null = the default transcription model */
+  model: string | null
+  /** null = the transcription language setting */
+  language: string | null
+  keepWarm: boolean
+  /** Microphone id; null = system default. Used by every recording. */
+  microphone: string | null
+  insertMethod: InsertMethod
+  focusPolicy: FocusPolicy
+  restoreClipboard: boolean
+  smartSpacing: boolean
+  removeFillers: boolean
+  voiceCommands: boolean
+  vocabulary: string[]
+  replacements: Replacement[]
+  appRules: AppRule[]
+  overlayPosition: OverlayPosition
+  showTarget: boolean
+  sounds: boolean
+  saveHistory: boolean
+  launchAtLogin: boolean
+  closeToTray: boolean
+}
+
+export interface DictationStatus {
+  /** Dictation works on this system (Windows for now). */
+  supported: boolean
+  /** The shortcut is being listened for. */
+  active: boolean
+  error: string | null
+  /** The model dictation will use, if one is installed. */
+  modelId: string | null
+  /** That model is loaded and ready. */
+  warm: boolean
+  hasLast: boolean
+}
+
+export interface Microphone {
+  id: string
+  name: string
+  isDefault: boolean
+}
+
+/** `dictation://done`: what was dictated and whether it was typed in. */
+export interface DictationDone {
+  text: string
+  inserted: boolean
+  method: 'direct' | 'paste' | 'type' | null
+  app: string | null
 }
 
 /** 'auto' = accurate for imported files, fast for in-app recordings. */
@@ -70,6 +162,8 @@ export interface PartialSettings {
   speechRate?: number
   historyRetentionDays?: number
   saveRecordings?: boolean
+  /** Replaces the dictation settings as a whole. */
+  dictation?: DictationSettings
 }
 
 /** Kind of compute device the speech engine found. */

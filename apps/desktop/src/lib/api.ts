@@ -6,6 +6,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
   AppPaths,
   CatalogModel,
+  DictationDone,
+  DictationStatus,
   DownloadProgress,
   EngineStatus,
   ExportFormat,
@@ -18,10 +20,12 @@ import type {
   JobErrorEvent,
   JobProgressEvent,
   MicErrorEvent,
+  Microphone,
   ModelKind,
   PartialSettings,
   RecordingResult,
   Settings,
+  Shortcut,
   StorageUsage,
   TranscriptSegment,
   Voice,
@@ -145,6 +149,19 @@ export const saveExportBytes = (args: { id: string; format: 'mp3'; bytes: Uint8A
 /** Delete all non-favorite items; resolves to the number deleted. */
 export const historyClear = () => invoke<number>('history_clear')
 
+// ---------- dictation ----------
+
+export const dictationStatus = () => invoke<DictationStatus>('dictation_status')
+/** Connected microphones, the system default first. */
+export const listMicrophones = () => invoke<Microphone[]>('list_microphones')
+/** Record the next key combination pressed anywhere; it arrives through `onShortcutCaptured`. */
+export const captureShortcut = (args: { active: boolean }) => invoke<void>('dictation_capture_shortcut', args)
+export const dictationStop = () => invoke<void>('dictation_stop')
+export const dictationCancel = () => invoke<void>('dictation_cancel')
+export const dictationPasteLast = () => invoke<void>('dictation_paste_last')
+/** Load the dictation model now, so the next dictation does not wait for it. */
+export const dictationWarmUp = () => invoke<void>('dictation_warm_up')
+
 // ---------- events ----------
 
 export const EVENTS = {
@@ -155,6 +172,10 @@ export const EVENTS = {
   sttDone: 'stt://done',
   micLevel: 'mic://level',
   micError: 'mic://error',
+  dictationStatus: 'dictation://status',
+  dictationCaptured: 'dictation://captured',
+  dictationSettings: 'dictation://settings',
+  dictationDone: 'dictation://done',
 } as const
 
 export const onDownloadProgress = (cb: (p: DownloadProgress) => void): Promise<UnlistenFn> =>
@@ -179,6 +200,20 @@ export const onMicLevel = (cb: (level: number) => void): Promise<UnlistenFn> =>
 /** The microphone failed or was disconnected while recording; the recording has ended. */
 export const onMicError = (cb: (p: MicErrorEvent) => void): Promise<UnlistenFn> =>
   listen<MicErrorEvent>(EVENTS.micError, (e) => cb(e.payload))
+
+export const onDictationStatus = (cb: (s: DictationStatus) => void): Promise<UnlistenFn> =>
+  listen<DictationStatus>(EVENTS.dictationStatus, (e) => cb(e.payload))
+
+/** The recorded shortcut, or null when recording it was cancelled (Escape). */
+export const onShortcutCaptured = (cb: (s: Shortcut | null) => void): Promise<UnlistenFn> =>
+  listen<Shortcut | null>(EVENTS.dictationCaptured, (e) => cb(e.payload))
+
+/** Settings changed outside the window (the tray, or a rule Talkr learned). */
+export const onSettingsChanged = (cb: (s: Settings) => void): Promise<UnlistenFn> =>
+  listen<Settings>(EVENTS.dictationSettings, (e) => cb(e.payload))
+
+export const onDictationDone = (cb: (d: DictationDone) => void): Promise<UnlistenFn> =>
+  listen<DictationDone>(EVENTS.dictationDone, (e) => cb(e.payload))
 
 // ---------- helpers ----------
 

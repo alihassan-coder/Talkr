@@ -309,6 +309,7 @@ impl Engines for NativeEngines {
             translate: job.translate,
             threads: job.model.threads,
             decoding: job.decoding,
+            prompt: job.prompt.as_deref(),
         };
         let transcript = engine.transcribe(&samples, &options, ctl)?;
         Ok(Transcribed {
@@ -427,7 +428,7 @@ mod tests {
     fn transcribe(id: &str, path: &str) -> String {
         to_line(&Request {
             id: id.into(),
-            op: Op::Transcribe(TranscribeJob { model: model(), audio_path: path.into(), language: None, translate: false, decoding: Default::default() }),
+            op: Op::Transcribe(TranscribeJob { model: model(), audio_path: path.into(), language: None, translate: false, decoding: Default::default(), prompt: None }),
         })
     }
 

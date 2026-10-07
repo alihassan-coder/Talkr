@@ -5,6 +5,7 @@ import { SystemStatus } from '@/components/SystemStatus'
 import { Toaster } from '@/components/Toaster'
 import { SpeakPage } from '@/pages/SpeakPage'
 import { TranscribePage } from '@/pages/TranscribePage'
+import { DictationPage } from '@/pages/DictationPage'
 import { ModelsPage } from '@/pages/ModelsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -16,12 +17,13 @@ import { useUi } from '@/stores/ui'
 const shortcuts: Record<string, string> = {
   '1': '/speak',
   '2': '/transcribe',
-  '3': '/models',
-  '4': '/history',
+  '3': '/dictation',
+  '4': '/models',
+  '5': '/history',
   ',': '/settings',
 }
 
-/** Ctrl/Cmd + 1-4 and Ctrl/Cmd + , jump between screens, like a native app. Ctrl/Cmd + B toggles the sidebar. */
+/** Ctrl/Cmd + 1-5 and Ctrl/Cmd + , jump between screens, like a native app. Ctrl/Cmd + B toggles the sidebar. */
 function useNavigationShortcuts() {
   const navigate = useNavigate()
   useEffect(() => {
@@ -105,6 +107,7 @@ export function App() {
             <Route path="/" element={<Navigate to="/speak" replace />} />
             <Route path="/speak" element={<SpeakPage />} />
             <Route path="/transcribe" element={<TranscribePage />} />
+            <Route path="/dictation" element={<DictationPage />} />
             <Route path="/models" element={<ModelsPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />

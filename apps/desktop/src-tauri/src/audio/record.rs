@@ -283,7 +283,14 @@ impl AudioRecorder {
 
     /// Start recording from the default microphone into a new WAV file at `path` (its folder
     /// must exist). The file is removed again if the microphone cannot be opened.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn start(&mut self, path: &Path) -> Result<()> {
+        self.start_with(path, None)
+    }
+
+    /// Like [`start`](Self::start), from the microphone with this id (see [`list_inputs`]); the
+    /// default one when `device` is `None` or no longer connected.
+    pub fn start_with(&mut self, path: &Path, device: Option<&str>) -> Result<()> {
         if self.is_recording() {
             return Err(AppError::Audio("Already recording".into()));
         }
@@ -301,9 +308,10 @@ impl AudioRecorder {
 
         let thread_signals = signals.clone();
         let thread_stop = stop.clone();
+        let device = device.map(str::to_string);
         let spawned = std::thread::Builder::new().name("talkr-recorder".into()).spawn(move || {
             let (queue_tx, queue_rx) = flume::bounded::<Vec<f32>>(QUEUE_CALLBACKS);
-            let stream = match open_input_stream(&thread_signals, queue_tx) {
+            let stream = match open_input_stream(&thread_signals, queue_tx, device.as_deref()) {
                 Ok(stream) => stream,
                 Err(e) => {
                     discard(writer);
@@ -482,10 +490,51 @@ fn stream_error_message(e: &cpal::Error) -> String {
     }
 }
 
-fn open_input_stream(signals: &RecorderSignals, queue: flume::Sender<Vec<f32>>) -> Result<cpal::Stream> {
+/// A microphone the user can pick.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputDevice {
+    /// Stable across restarts; what the `microphone` setting stores.
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// The microphones connected right now, the system default first.
+pub fn list_inputs() -> Result<Vec<InputDevice>> {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
+    let default_id = host.default_input_device().and_then(|d| d.id().ok()).map(|id| id.to_string());
+    let mut devices: Vec<InputDevice> = host
+        .input_devices()
+        .map_err(audio_error)?
+        .filter_map(|d| {
+            let id = d.id().ok()?.to_string();
+            let name = d.description().map(|desc| desc.name().to_string()).unwrap_or_else(|_| d.to_string());
+            Some(InputDevice { is_default: default_id.as_deref() == Some(id.as_str()), id, name })
+        })
+        .collect();
+    devices.sort_by_key(|d| !d.is_default);
+    Ok(devices)
+}
+
+/// The microphone with id `wanted`, or the default one.
+fn input_device(host: &cpal::Host, wanted: Option<&str>) -> Option<cpal::Device> {
+    if let Some(wanted) = wanted {
+        let found = host
+            .input_devices()
+            .ok()
+            .and_then(|mut devices| devices.find(|d| d.id().is_ok_and(|id| id.to_string() == wanted)));
+        match found {
+            Some(device) => return Some(device),
+            None => log::warn!("the chosen microphone is not connected; using the default one"),
+        }
+    }
+    host.default_input_device()
+}
+
+fn open_input_stream(signals: &RecorderSignals, queue: flume::Sender<Vec<f32>>, wanted: Option<&str>) -> Result<cpal::Stream> {
+    let host = cpal::default_host();
+    let device = input_device(&host, wanted)
         .ok_or_else(|| AppError::Audio("No microphone found. Connect one and try again.".into()))?;
 
     let config = device.default_input_config().map_err(audio_error)?;

@@ -80,6 +80,11 @@ const handles = [
     ),
   },
   {
+    term: 'Dictation',
+    detail:
+      'Off until you turn it on (Windows). Talkr then watches the keyboard only to spot your dictation shortcut and never records what you type. To insert text it briefly uses the clipboard, marked so clipboard history skips it, and puts back what you had copied. Text typed into password fields is never saved.',
+  },
+  {
     term: 'Telemetry',
     detail:
       'None. No analytics, no crash reports, no usage statistics. Talkr goes online only to download a model you pick and to check for updates, which you can turn off.',

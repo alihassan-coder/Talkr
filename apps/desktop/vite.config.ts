@@ -26,6 +26,13 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: {
     outDir: 'dist',
+    // Two pages: the app, and the dictation pill's window (src-tauri/src/dictation/overlay.rs).
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        overlay: fileURLToPath(new URL('./overlay.html', import.meta.url)),
+      },
+    },
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome110' : 'safari15',
     minify: !debug,
     sourcemap: debug,

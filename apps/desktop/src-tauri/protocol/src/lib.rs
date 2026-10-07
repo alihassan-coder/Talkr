@@ -54,6 +54,10 @@ pub struct TranscribeJob {
     pub translate: bool,
     #[serde(default)]
     pub decoding: Decoding,
+    /// Text whisper reads as if it came just before the audio: names and terms the user wants
+    /// spelled their way (dictation's custom vocabulary). Leaves the result's wording alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 /// How hard whisper searches for the transcript.
@@ -206,6 +210,7 @@ mod tests {
                     language: Some("en".into()),
                     translate: false,
                     decoding: Decoding::Beam,
+                    prompt: Some("Talkr, Kokoro".into()),
                 }),
             },
             Request {
@@ -242,7 +247,10 @@ mod tests {
     fn decoding_defaults_to_greedy() {
         let line = r#"{"id":"1","op":"transcribe","model":{"modelId":"m","dir":"d","threads":1,"gpu":false},"audioPath":"a.wav","language":null,"translate":false}"#;
         match from_line::<Request>(line).unwrap().op {
-            Op::Transcribe(job) => assert_eq!(job.decoding, Decoding::Greedy),
+            Op::Transcribe(job) => {
+                assert_eq!(job.decoding, Decoding::Greedy);
+                assert_eq!(job.prompt, None);
+            }
             other => panic!("{other:?}"),
         }
     }

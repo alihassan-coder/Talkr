@@ -391,6 +391,11 @@ impl EngineHost {
         devices
     }
 
+    /// Whether a job (or probe) is running or queued right now.
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst) > 0
+    }
+
     /// The model the running engine keeps loaded (the last one a job used successfully), or
     /// `None` when no engine is running.
     pub fn resident_model(&self) -> Option<String> {
@@ -973,6 +978,7 @@ mod tests {
             language: None,
             translate: false,
             decoding: Default::default(),
+            prompt: None,
         })
     }
 

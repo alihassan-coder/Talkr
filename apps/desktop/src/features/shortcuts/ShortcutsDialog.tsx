@@ -9,8 +9,9 @@ const groups = (mod: string) => [
     items: [
       { keys: [mod, '1'], label: 'Speak' },
       { keys: [mod, '2'], label: 'Transcribe' },
-      { keys: [mod, '3'], label: 'Models' },
-      { keys: [mod, '4'], label: 'History' },
+      { keys: [mod, '3'], label: 'Dictation' },
+      { keys: [mod, '4'], label: 'Models' },
+      { keys: [mod, '5'], label: 'History' },
       { keys: [mod, ','], label: 'Settings' },
     ],
   },
@@ -19,6 +20,14 @@ const groups = (mod: string) => [
     items: [
       { keys: [mod, 'B'], label: 'Show or hide the sidebar' },
       { keys: ['?'], label: 'This list' },
+    ],
+  },
+  {
+    title: 'Dictation, in any app (defaults; change them in Dictation)',
+    items: [
+      { keys: ['Ctrl', 'Win'], label: 'Hold to dictate, tap for hands-free' },
+      { keys: ['Esc'], label: 'Cancel a dictation' },
+      { keys: ['Alt', 'Shift', 'V'], label: 'Paste the last dictation again' },
     ],
   },
   {

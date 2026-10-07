@@ -35,6 +35,8 @@ import { AppearanceSection } from '@/features/settings/Appearance'
 import { ComputeSection } from '@/features/settings/Compute'
 import { UpdatesSection } from '@/features/settings/Updates'
 import { formatBytes } from '@/features/history/utils'
+import { defaultDictation } from '@/features/dictation/shortcut'
+import { languages } from '@/lib/languages'
 
 const REPO_URL = 'https://github.com/alihassan-coder/Talkr'
 
@@ -51,6 +53,7 @@ const defaultSettings: Settings = {
   speechRate: 1,
   historyRetentionDays: 0,
   saveRecordings: true,
+  dictation: defaultDictation,
 }
 
 const qualityOptions: { value: SttQuality; label: string }[] = [
@@ -76,27 +79,6 @@ function rollbackFields(current: Settings, patch: PartialSettings, previous: Set
   }
   return next
 }
-
-const languages: [string, string][] = [
-  ['auto', 'Detect automatically'],
-  ['en', 'English'],
-  ['es', 'Spanish'],
-  ['fr', 'French'],
-  ['de', 'German'],
-  ['it', 'Italian'],
-  ['pt', 'Portuguese'],
-  ['nl', 'Dutch'],
-  ['pl', 'Polish'],
-  ['tr', 'Turkish'],
-  ['ru', 'Russian'],
-  ['uk', 'Ukrainian'],
-  ['ar', 'Arabic'],
-  ['hi', 'Hindi'],
-  ['ur', 'Urdu'],
-  ['zh', 'Chinese'],
-  ['ja', 'Japanese'],
-  ['ko', 'Korean'],
-]
 
 const retentionOptions: [number, string][] = [
   [0, 'Forever'],

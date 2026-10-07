@@ -6,6 +6,26 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
+## Unreleased
+
+### New
+- **Dictate anywhere** (Windows): hold Ctrl + Win in any app, speak, and let go; your words are
+  typed where your cursor is, transcribed on your computer. Tap the shortcut for hands-free
+  dictation, press Esc to cancel, and Alt + Shift + V pastes the last dictation again.
+- A floating pill shows the live waveform, which app the text goes to, and the result.
+- Text lands in the field you started in: Talkr checks the field takes text, picks the best way
+  in (straight into classic text boxes, pasting, or typing for remote desktops), reads the field
+  back to confirm, and keeps your clipboard as it was. If it cannot insert, the text is copied
+  and the pill says why.
+- A new **Dictation** page: your own shortcuts (recorded from the keyboard), hold, tap or toggle,
+  a separate model and language, microphone choice, custom vocabulary, replacements, filler-word
+  removal, "new line" voice commands, per-app rules, and a practice box.
+- Talkr can start with Windows and keep running in the tray while dictation is on.
+
+### Changed
+- Ctrl 3 now opens Dictation; Models and History moved to Ctrl 4 and Ctrl 5.
+- The chosen microphone is also used for recordings in Transcribe.
+
 ## 0.1.7 - 2026-10-07
 
 ### New

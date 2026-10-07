@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router'
-import { Boxes, History, Mic, PanelLeftClose, PanelLeftOpen, Settings, Volume2 } from 'lucide-react'
+import { AudioLines, Boxes, History, Mic, PanelLeftClose, PanelLeftOpen, Settings, Volume2 } from 'lucide-react'
 import { LogoMark } from '@/components/Logo'
 import { Kbd } from '@/components/ui'
 import { cx } from '@/lib/cx'
@@ -11,8 +11,9 @@ import { shouldOffer, useUpdates } from '@/stores/updates'
 const primary = [
   { to: '/speak', label: 'Speak', icon: Volume2, key: '1' },
   { to: '/transcribe', label: 'Transcribe', icon: Mic, key: '2' },
-  { to: '/models', label: 'Models', icon: Boxes, key: '3' },
-  { to: '/history', label: 'History', icon: History, key: '4' },
+  { to: '/dictation', label: 'Dictation', icon: AudioLines, key: '3' },
+  { to: '/models', label: 'Models', icon: Boxes, key: '4' },
+  { to: '/history', label: 'History', icon: History, key: '5' },
 ]
 
 /**

@@ -1,0 +1,396 @@
+@import "../styles/globals.css";
+
+/*
+  The dictation pill. Always dark glass whatever the app's mode, with the theme's accent.
+  Sizes animate between states (interpolate-size lets `width: auto` transition).
+*/
+
+:root {
+  interpolate-size: allow-keywords;
+  --pill-bg-top: rgb(34 34 38 / 0.97);
+  --pill-bg-bottom: rgb(16 16 19 / 0.97);
+  --pill-fg: #f2f2ef;
+  --pill-muted: rgb(242 242 239 / 0.56);
+  --pill-line: rgb(255 255 255 / 0.09);
+  --pill-warn: #f5b84b;
+  --pill-error: #ff7a6e;
+  --spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  width: auto;
+  max-width: 440px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  color: var(--pill-fg);
+  background: linear-gradient(180deg, var(--pill-bg-top), var(--pill-bg-bottom));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 0 0 1px var(--pill-line),
+    0 12px 32px -10px rgb(0 0 0 / 0.7),
+    0 3px 10px -2px rgb(0 0 0 / 0.4);
+  transition:
+    width 420ms var(--spring),
+    opacity 200ms ease,
+    transform 420ms var(--spring),
+    filter 300ms ease;
+  pointer-events: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.pill[data-visible="false"] {
+  opacity: 0;
+  transform: translateY(10px) scale(0.86);
+  filter: blur(2px);
+}
+
+.pill[data-visible="true"] {
+  animation: pill-in 460ms var(--spring) both;
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.6);
+    filter: blur(3px);
+  }
+  60% {
+    opacity: 1;
+    filter: none;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The accent glow behind the pill; its strength follows the voice. */
+.glow {
+  position: absolute;
+  width: 300px;
+  height: 64px;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--color-accent) 70%, transparent), transparent);
+  filter: blur(18px);
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity 260ms ease,
+    transform 260ms ease;
+}
+
+.glow[data-on="true"] {
+  opacity: calc(0.22 + var(--level, 0) * 0.55);
+  transform: scale(calc(0.9 + var(--level, 0) * 0.25));
+}
+
+/* Recording dot with a ripple. */
+.rec {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--color-accent) 75%, transparent);
+}
+
+.rec::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 1.5px solid var(--color-accent);
+  opacity: 0;
+  animation: ripple 1.6s ease-out infinite;
+}
+
+@keyframes ripple {
+  from {
+    opacity: 0.7;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  flex: none;
+}
+
+.wave span {
+  width: 3px;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--color-accent) 100%, white 25%), var(--color-accent));
+  transform: scaleY(0.12);
+  transform-origin: center;
+  will-change: transform;
+}
+
+.timer {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pill-muted);
+  min-width: 30px;
+  text-align: right;
+}
+
+.target {
+  font-size: 11.5px;
+  color: var(--pill-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.detail {
+  font-size: 12px;
+  color: var(--pill-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--pill-muted) 0%,
+    var(--pill-fg) 45%,
+    var(--pill-fg) 55%,
+    var(--pill-muted) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sweep 1.4s linear infinite;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
+  }
+}
+
+/* Thinking: dots in a wave. */
+.dots {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  animation: bob 900ms ease-in-out infinite;
+}
+
+.dots i:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.dots i:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(2px);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Done: a check that draws itself. */
+.badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-accent) 22%, transparent);
+  color: var(--color-accent);
+  animation: pop-in 380ms var(--spring) both;
+}
+
+.badge[data-tone="warn"] {
+  background: color-mix(in oklab, var(--pill-warn) 20%, transparent);
+  color: var(--pill-warn);
+}
+
+.badge[data-tone="error"] {
+  background: color-mix(in oklab, var(--pill-error) 20%, transparent);
+  color: var(--pill-error);
+}
+
+.badge[data-tone="info"],
+.badge[data-tone="muted"] {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--pill-muted);
+}
+
+.check path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  animation: draw 420ms 120ms ease-out forwards;
+}
+
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.preview {
+  font-size: 13px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 999px;
+  border: 0;
+  color: var(--pill-muted);
+  background: rgb(255 255 255 / 0.06);
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: var(--pill-fg);
+}
+
+.btn:active {
+  transform: scale(0.94);
+}
+
+.btn.primary {
+  padding: 0 12px 0 10px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+.btn.primary:hover {
+  background: color-mix(in oklab, var(--color-accent) 88%, white);
+  color: var(--color-on-accent);
+}
+
+.lock {
+  color: var(--color-accent);
+  flex: none;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: var(--pill-muted);
+  background: rgb(255 255 255 / 0.07);
+}
+
+.fade-in {
+  animation: fade-in 260ms ease both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill,
+  .pill[data-visible="true"],
+  .rec::after,
+  .dots i,
+  .shimmer,
+  .check path,
+  .badge {
+    animation: none !important;
+    transition: opacity 120ms ease !important;
+  }
+  .check path {
+    stroke-dashoffset: 0;
+  }
+}

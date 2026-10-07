@@ -96,7 +96,8 @@ fn check_cpu_support() -> Result<()> {
     Ok(())
 }
 
-/// Start recording from the default microphone into a new WAV file under `~/.talkr/audio`.
+/// Start recording from the chosen microphone (the default one unless set) into a new WAV file
+/// under `~/.talkr/audio`.
 /// Emits `mic://level` (RMS, 0..1) ~20x/s, and `mic://error` ({ message }) once if the microphone
 /// fails or the file cannot be written; what was captured is kept until `stop_recording`.
 #[command]
@@ -107,11 +108,12 @@ pub async fn start_recording(state: State<'_, AppState>, app: AppHandle) -> Resu
     }
     // Opening the device can take seconds (or time out) with some drivers; keep it off the
     // async runtime.
+    let microphone = state.settings().dictation.microphone.clone();
     let recorder_app = app.clone();
     let signals = tauri::async_runtime::spawn_blocking(move || -> Result<_> {
         let state = recorder_app.state::<AppState>();
         let mut recorder = state.recorder();
-        recorder.start(&audio_path)?;
+        recorder.start_with(&audio_path, microphone.as_deref())?;
         Ok(recorder.signals())
     })
     .await??;
@@ -260,6 +262,7 @@ fn run_transcription(app: &AppHandle, state: &AppState, job_id: &str, request: &
             language: request.language.clone(),
             translate: request.translate,
             decoding,
+            prompt: None,
         })
     };
     let (transcript, duration_ms, device) = match state.engine.run(job_id, &make_op, gpu, &progress)? {

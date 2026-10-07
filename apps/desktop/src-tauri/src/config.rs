@@ -2,6 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use crate::dictation::settings::DictationSettings;
 use crate::error::{AppError, Result};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,6 +19,8 @@ pub struct Settings {
     pub speech_rate: f32,
     pub history_retention_days: u32,
     pub save_recordings: bool,
+    /// System-wide dictation (hold a shortcut anywhere, speak, and the text is typed).
+    pub dictation: DictationSettings,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,6 +77,7 @@ impl Default for Settings {
             speech_rate: 1.0,
             history_retention_days: 0,
             save_recordings: true,
+            dictation: DictationSettings::default(),
         }
     }
 }
@@ -173,6 +177,9 @@ impl Settings {
                 *value = None;
             }
         }
+        for notice in self.dictation.sanitize() {
+            notices.push(format!("Settings: {}", notice));
+        }
     }
 
     pub fn merge(&mut self, patch: PartialSettings) {
@@ -206,6 +213,9 @@ impl Settings {
         if let Some(save_recordings) = patch.save_recordings {
             self.save_recordings = save_recordings;
         }
+        if let Some(dictation) = patch.dictation {
+            self.dictation = dictation;
+        }
     }
 }
 
@@ -222,6 +232,8 @@ pub struct PartialSettings {
     pub speech_rate: Option<f32>,
     pub history_retention_days: Option<u32>,
     pub save_recordings: Option<bool>,
+    /// Replaces the dictation settings as a whole.
+    pub dictation: Option<DictationSettings>,
 }
 
 impl PartialSettings {
@@ -259,6 +271,9 @@ impl PartialSettings {
             if let Some(problem) = value.as_deref().and_then(text_setting_problem) {
                 return Err(AppError::Validation(format!("{} {}", name, problem)));
             }
+        }
+        if let Some(problem) = self.dictation.as_ref().and_then(DictationSettings::problem) {
+            return Err(AppError::Validation(problem));
         }
         Ok(())
     }

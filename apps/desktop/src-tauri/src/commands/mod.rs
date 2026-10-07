@@ -1,3 +1,4 @@
+pub mod dictation;
 pub mod history;
 pub mod models;
 pub mod settings;
@@ -5,6 +6,7 @@ pub mod stt;
 pub mod system;
 pub mod tts;
 
+pub use dictation::*;
 pub use history::*;
 pub use models::*;
 pub use settings::*;

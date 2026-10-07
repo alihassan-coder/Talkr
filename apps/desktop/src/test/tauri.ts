@@ -2,6 +2,7 @@ import { act } from '@testing-library/react'
 import { emit } from '@tauri-apps/api/event'
 import { mockConvertFileSrc, mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import type { InvokeArgs } from '@tauri-apps/api/core'
+import { defaultDictation } from '@/features/dictation/shortcut'
 import type {
   AppPaths,
   CatalogModel,
@@ -72,6 +73,7 @@ export const settingsFixture = (patch: Partial<Settings> = {}): Settings => ({
   speechRate: 1,
   historyRetentionDays: 0,
   saveRecordings: true,
+  dictation: defaultDictation,
   ...patch,
 })
 

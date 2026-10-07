@@ -100,6 +100,10 @@ describe('api events', () => {
       sttDone: 'stt://done',
       micLevel: 'mic://level',
       micError: 'mic://error',
+      dictationStatus: 'dictation://status',
+      dictationCaptured: 'dictation://captured',
+      dictationSettings: 'dictation://settings',
+      dictationDone: 'dictation://done',
     })
   })
 })

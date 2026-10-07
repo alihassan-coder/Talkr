@@ -70,7 +70,9 @@ describe('Sidebar', () => {
         <App />
       </MemoryRouter>,
     )
-    await user.keyboard('{Control>}3{/Control}')
+    await user.keyboard('{Control>}4{/Control}')
     expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument()
+    await user.keyboard('{Control>}3{/Control}')
+    expect(await screen.findByRole('heading', { name: 'Dictation' })).toBeInTheDocument()
   })
 })

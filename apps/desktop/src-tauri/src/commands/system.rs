@@ -118,7 +118,14 @@ pub async fn update_settings(app: AppHandle, settings: PartialSettings) -> Resul
                 state.engine.stop_gpu_engine_if_idle();
             }
         }
+        let dictation_changed = updated.dictation != current.dictation;
         *current = updated.clone();
+        drop(current);
+        if dictation_changed {
+            app.state::<crate::dictation::Dictation>().reconfigure();
+            #[cfg(windows)]
+            crate::tray::sync(&app);
+        }
         Ok(updated)
     })
     .await?

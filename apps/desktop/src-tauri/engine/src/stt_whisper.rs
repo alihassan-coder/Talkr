@@ -13,6 +13,8 @@ pub struct TranscribeOptions<'a> {
     pub translate: bool,
     pub threads: usize,
     pub decoding: Decoding,
+    /// Vocabulary hint for the decoder (see `TranscribeJob::prompt`).
+    pub prompt: Option<&'a str>,
 }
 
 /// Beam search uses whisper.cpp's CLI default of 5 beams.
@@ -89,7 +91,7 @@ impl WhisperEngine {
 
     /// Transcribe 16 kHz mono samples.
     pub fn transcribe(&self, samples: &[f32], options: &TranscribeOptions, ctl: &JobControl) -> Result<Transcript> {
-        let TranscribeOptions { language, translate, threads, decoding } = *options;
+        let TranscribeOptions { language, translate, threads, decoding, prompt } = *options;
         logger::take_last_error();
         let mut state = self.ctx.create_state().map_err(|e| self.native_error("prepare", e))?;
 
@@ -101,6 +103,10 @@ impl WhisperEngine {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        // set_initial_prompt panics on a NUL byte; the app never sends one, but never crash on it.
+        if let Some(prompt) = prompt.map(|p| p.replace('\0', "")).filter(|p| !p.trim().is_empty()) {
+            params.set_initial_prompt(&prompt);
+        }
 
         let progress_ctl = ctl.clone();
         params.set_progress_callback_safe(move |progress: i32| {

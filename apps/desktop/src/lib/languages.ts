@@ -1,0 +1,21 @@
+/** Spoken languages offered for transcription and dictation: [code, name]. 'auto' detects. */
+export const languages: [string, string][] = [
+  ['auto', 'Detect automatically'],
+  ['en', 'English'],
+  ['es', 'Spanish'],
+  ['fr', 'French'],
+  ['de', 'German'],
+  ['it', 'Italian'],
+  ['pt', 'Portuguese'],
+  ['nl', 'Dutch'],
+  ['pl', 'Polish'],
+  ['tr', 'Turkish'],
+  ['ru', 'Russian'],
+  ['uk', 'Ukrainian'],
+  ['ar', 'Arabic'],
+  ['hi', 'Hindi'],
+  ['ur', 'Urdu'],
+  ['zh', 'Chinese'],
+  ['ja', 'Japanese'],
+  ['ko', 'Korean'],
+]

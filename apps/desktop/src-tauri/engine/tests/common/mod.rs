@@ -171,6 +171,7 @@ pub fn transcribe_with(id: &str, model: ModelRef, audio: &Path, decoding: Decodi
             language: Some("en".into()),
             translate: false,
             decoding,
+            prompt: None,
         }),
     }
 }

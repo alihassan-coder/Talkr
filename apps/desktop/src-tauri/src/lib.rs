@@ -11,11 +11,14 @@ mod catalog;
 mod commands;
 mod config;
 mod db;
+mod dictation;
 mod downloader;
 mod engine_host;
 mod error;
 mod hardware;
 mod paths;
+#[cfg(windows)]
+mod tray;
 
 use audio::record::AudioRecorder;
 use commands::*;
@@ -105,6 +108,24 @@ const ENGINE_IDLE: Duration = Duration::from_secs(5 * 60);
 /// Settings page): it costs memory (a GPU context, with Vulkan) and is quick to start again.
 const ENGINE_IDLE_NO_MODEL: Duration = Duration::from_secs(60);
 
+/// Passed by the login item: start in the tray, without the window.
+const STARTED_HIDDEN_ARG: &str = "--hidden";
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Whether closing the window should leave Talkr running in the tray.
+fn keeps_running_in_tray(app: &tauri::AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let settings = state.settings();
+    cfg!(windows) && settings.dictation.enabled && settings.dictation.close_to_tray
+}
+
 /// Lock a mutex, recovering from poisoning (a panicked job must not brick the app).
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -164,6 +185,13 @@ pub fn run() {
     let engine = EngineHost::new(Box::new(NativeLauncher::locate()), Some(paths.cache.join("engine-gpu-failed")));
 
     tauri::Builder::default()
+        // First: a second launch hands over to the running Talkr (which shows its window) and
+        // exits before it sets anything up.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![STARTED_HIDDEN_ARG]),
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -221,7 +249,24 @@ pub fn run() {
             history_clear,
             get_storage_usage,
             run_retention,
+            dictation_status,
+            list_microphones,
+            dictation_capture_shortcut,
+            dictation_stop,
+            dictation_cancel,
+            dictation_paste_last,
+            dictation_warm_up,
         ])
+        .on_window_event(|window, event| {
+            // With dictation on, closing the window keeps Talkr in the tray so the shortcut
+            // still works. Quit from the tray menu.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && keeps_running_in_tray(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(move |app| {
             // Panics go to talkr.log, so a failed run leaves a trace for bug reports. (The engine
             // process's own log arrives through engine_host.)
@@ -253,14 +298,31 @@ pub fn run() {
                 }
             })?;
 
-            // A loaded model holds hundreds of MB to GBs; give it back when nobody is using it.
+            // A loaded model holds hundreds of MB to GBs; give it back when nobody is using it,
+            // unless it is the one dictation keeps ready.
             let handle = app.handle().clone();
             std::thread::Builder::new().name("talkr-engine-idle".into()).spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 let state = handle.state::<AppState>();
-                let idle = if state.engine.resident_model().is_some() { ENGINE_IDLE } else { ENGINE_IDLE_NO_MODEL };
+                let resident = state.engine.resident_model();
+                if resident.is_some() && resident == dictation::warm_model(&state) {
+                    continue;
+                }
+                let idle = if resident.is_some() { ENGINE_IDLE } else { ENGINE_IDLE_NO_MODEL };
                 state.engine.stop_if_idle(idle);
             })?;
+
+            app.manage(dictation::Dictation::start(app.handle()));
+            #[cfg(windows)]
+            if let Err(e) = tray::create(app.handle()) {
+                log::error!("could not create the tray icon: {}", e);
+            }
+            // Launched at login: stay in the tray. Otherwise show the window (it is created
+            // hidden so a login start never flashes it).
+            let started_hidden = std::env::args().any(|a| a == STARTED_HIDDEN_ARG);
+            if !(started_hidden && keeps_running_in_tray(app.handle())) {
+                show_main_window(app.handle());
+            }
             Ok(())
         })
         .build(context)
