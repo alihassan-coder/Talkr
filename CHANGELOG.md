@@ -6,6 +6,19 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
+## 0.1.7 - 2026-10-07
+
+### New
+- **Zoom** the whole interface with Ctrl + and Ctrl − (⌘ on macOS), or Ctrl and the mouse wheel;
+  Ctrl 0 resets it. Settings → Appearance shows the level and remembers it.
+- **Custom theme**: pick any accent colour, and Talkr builds matching light and dark palettes
+  from it, keeping text readable.
+- A redesigned Appearance section, with previews that follow your light or dark choice.
+
+### Fixed
+- The selected item in the sidebar no longer shows a stray bar beside its highlight.
+- The sidebar's device card no longer clips its border or overflows long processor names.
+
 ## 0.1.6 - 2026-10-05
 
 ### New
