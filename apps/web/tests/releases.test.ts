@@ -9,9 +9,16 @@ const desktopVersion = (JSON.parse(readFileSync(new URL('../../desktop/package.j
 const RELEASE_BASE = `https://github.com/alihassan-coder/Talkr/releases/download/v${VERSION}/`
 
 describe('release links', () => {
-  it('tracks the desktop app version', () => {
+  it('tracks the desktop app version, staying on the last stable release during a beta', () => {
     expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/)
-    expect(VERSION).toBe(desktopVersion)
+    if (/^\d+\.\d+\.\d+-\d+$/.test(desktopVersion)) {
+      // A beta (X.Y.Z-N) is a GitHub pre-release; the site keeps offering the stable version.
+      const [major, minor, patch] = desktopVersion.split('-')[0]!.split('.').map(Number)
+      const [sMajor, sMinor, sPatch] = VERSION.split('.').map(Number)
+      expect(sMajor! * 1e6 + sMinor! * 1e3 + sPatch!).toBeLessThan(major! * 1e6 + minor! * 1e3 + patch!)
+    } else {
+      expect(VERSION).toBe(desktopVersion)
+    }
   })
 
   it('points at the repository', () => {
