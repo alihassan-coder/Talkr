@@ -18,6 +18,7 @@ use super::clipboard;
 use crate::dictation::settings::{AppMethod, DictationSettings, FocusPolicy, InsertMethod};
 
 const EM_REPLACESEL: u32 = 0x00C2;
+const EM_GETSEL: u32 = 0x00B0;
 
 /// Remote desktops and virtual machines: their clipboard is not this one, but keystrokes pass.
 const TYPE_APPS: &[&str] = &[
@@ -201,31 +202,33 @@ pub fn deliver(ready: &Ready, text: &str, settings: &DictationSettings, owner: O
         method = Method::Paste { shift_insert: false };
     }
 
-    let verdict = run(method, ready, text, settings, owner);
-    match verdict {
+    // When it cannot be inserted, the caller copies it (and says whether that worked).
+    match run(method, ready, text, settings, owner) {
         Some(Verdict::Unchanged) if matches!(method, Method::Paste { .. }) && can_retry(ready) => {
+            // A slow app can take the paste after the check gave up: look once more before
+            // typing, or the text could arrive twice.
+            std::thread::sleep(Duration::from_millis(350));
+            let late = uia::inspect(Duration::from_millis(400));
+            let verdict = uia::verdict(ready.field.as_ref(), late.as_ref(), text);
+            if verdict != Verdict::Unchanged {
+                return Outcome::Inserted { method, verdict, learned_typing: false };
+            }
             // Certain the paste did not land: type it instead, and remember that for this app.
             log::info!("paste did not reach {}; typing instead", ready.target.exe);
-            let typing = Method::Type {
-                line_break: if CHAT_APPS.contains(&ready.target.exe.as_str()) { LineBreak::ShiftEnter } else { LineBreak::Enter },
-            };
+            let typing = typing_for(&ready.target);
             match run(typing, ready, text, settings, owner) {
-                Some(Verdict::Unchanged) | None => {
-                    clipboard::put_text(text, owner, false);
-                    Outcome::Copied(CopyReason::NotDelivered)
-                }
+                Some(Verdict::Unchanged) | None => Outcome::Copied(CopyReason::NotDelivered),
                 Some(v) => Outcome::Inserted { method: typing, verdict: v, learned_typing: v == Verdict::Arrived },
             }
         }
-        Some(Verdict::Unchanged) => {
-            clipboard::put_text(text, owner, false);
-            Outcome::Copied(CopyReason::NotDelivered)
-        }
+        Some(Verdict::Unchanged) | None => Outcome::Copied(CopyReason::NotDelivered),
         Some(v) => Outcome::Inserted { method, verdict: v, learned_typing: false },
-        None => {
-            clipboard::put_text(text, owner, false);
-            Outcome::Copied(CopyReason::NotDelivered)
-        }
+    }
+}
+
+fn typing_for(target: &Target) -> Method {
+    Method::Type {
+        line_break: if CHAT_APPS.contains(&target.exe.as_str()) { LineBreak::ShiftEnter } else { LineBreak::Enter },
     }
 }
 
@@ -241,8 +244,23 @@ fn run(method: Method, ready: &Ready, text: &str, settings: &DictationSettings, 
         Method::Direct => None,
         Method::Paste { shift_insert } => {
             let restore = settings.restore_clipboard;
-            let saved = if restore { clipboard::save(owner) } else { None };
-            let sequence = clipboard::put_text(&text, owner, restore)?;
+            let saved = if restore {
+                match clipboard::save(owner) {
+                    Some(saved) => Some(saved),
+                    // Another app holds the clipboard: pasting now would replace what the user
+                    // copied with no way to put it back. Type instead.
+                    None => return run(typing_for(&ready.target), ready, &text, settings, owner),
+                }
+            } else {
+                None
+            };
+            let Some(sequence) = clipboard::put_text(&text, owner, restore) else {
+                // Emptied but not filled: give the user's content back.
+                if let Some(saved) = saved {
+                    clipboard::restore(saved, clipboard::sequence(), owner);
+                }
+                return None;
+            };
             let sent = if shift_insert {
                 keys::chord(&[keys::VK_SHIFT], keys::VK_INSERT)
             } else {
@@ -312,6 +330,16 @@ fn direct(control: HWND, text: &str) -> bool {
         (ok.0 != 0).then_some(result)
     };
     let Some(before) = length(control) else { return false };
+    // The selection, which the text replaces (packed in the result; exact below 64K characters).
+    let mut packed = 0usize;
+    // SAFETY: EM_GETSEL with null pointers only returns the packed positions.
+    let selection = unsafe {
+        SendMessageTimeoutW(control, EM_GETSEL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG, 500, Some(&mut packed))
+    };
+    let selected = (selection.0 != 0 && before < 0xFFFF).then(|| {
+        let (start, end) = (packed & 0xFFFF, (packed >> 16) & 0xFFFF);
+        end.saturating_sub(start)
+    });
     // Edit controls want CRLF line breaks.
     let wide: Vec<u16> = text.replace("\r\n", "\n").replace('\n', "\r\n").encode_utf16().chain(Some(0)).collect();
     let mut result = 0usize;
@@ -331,7 +359,21 @@ fn direct(control: HWND, text: &str) -> bool {
     if ok.0 == 0 {
         return false;
     }
-    length(control).is_some_and(|after| after > before)
+    let Some(after) = length(control) else { return true };
+    direct_landed(before, after, selected, wide.len() - 1)
+}
+
+/// Whether EM_REPLACESEL took the text, from the control's length before and after. When in
+/// doubt it says yes: a wrong "no" would insert the text a second time by pasting.
+fn direct_landed(before: usize, after: usize, selected: Option<usize>, inserted: usize) -> bool {
+    if after != before {
+        return true;
+    }
+    // Same length: either nothing happened, or the text replaced a selection of the same size.
+    match selected {
+        Some(selected) => selected == inserted && inserted > 0,
+        None => true,
+    }
 }
 
 #[cfg(test)]
@@ -365,6 +407,20 @@ mod tests {
         };
         assert_eq!(choose(&target("slack.exe", ""), &s), Err(CopyReason::AppOff));
         assert_eq!(choose(&target("notepad.exe", "Edit"), &s), Ok((Method::Paste { shift_insert: false }, true)));
+    }
+
+    #[test]
+    fn direct_insertion_is_judged_without_double_inserts() {
+        // Grew: in.
+        assert!(direct_landed(10, 15, Some(0), 5));
+        // Replaced a longer selection: shrank, still in.
+        assert!(direct_landed(11, 2, Some(11), 2));
+        // Same length with an empty selection: the control ignored it.
+        assert!(!direct_landed(10, 10, Some(0), 5));
+        // Same length, replaced a selection of the same size: in.
+        assert!(direct_landed(10, 10, Some(5), 5));
+        // Unknown selection and same length: assume in rather than risk typing it twice.
+        assert!(direct_landed(10, 10, None, 5));
     }
 
     #[test]

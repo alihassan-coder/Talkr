@@ -158,7 +158,8 @@ export const listMicrophones = () => invoke<Microphone[]>('list_microphones')
 export const captureShortcut = (args: { active: boolean }) => invoke<void>('dictation_capture_shortcut', args)
 export const dictationStop = () => invoke<void>('dictation_stop')
 export const dictationCancel = () => invoke<void>('dictation_cancel')
-export const dictationPasteLast = () => invoke<void>('dictation_paste_last')
+/** Copy the last dictation to the clipboard. */
+export const dictationCopyLast = () => invoke<void>('dictation_copy_last')
 /** Load the dictation model now, so the next dictation does not wait for it. */
 export const dictationWarmUp = () => invoke<void>('dictation_warm_up')
 

@@ -21,7 +21,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let enabled = app.state::<AppState>().settings().dictation.enabled;
     let open = MenuItem::with_id(app, "open", "Open Talkr", true, None::<&str>)?;
     let dictation = CheckMenuItem::with_id(app, "dictation", "Dictation", true, enabled, None::<&str>)?;
-    let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, None::<&str>)?;
+    let paste = MenuItem::with_id(app, "copy-last", "Copy last dictation", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Talkr", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -39,7 +39,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                     log::warn!("could not switch dictation from the tray: {}", e);
                 }
             }
-            "paste-last" => app.state::<Dictation>().paste_last(),
+            "copy-last" => app.state::<Dictation>().copy_last(),
             "quit" => app.exit(0),
             _ => {}
         })

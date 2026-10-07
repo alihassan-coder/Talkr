@@ -2,8 +2,8 @@
 //! showing it is instant (a webview takes a few hundred milliseconds to start); it never takes
 //! focus from the app being typed in, and lets clicks through except while it shows buttons.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -63,6 +63,9 @@ pub enum Tone {
 pub struct Overlay {
     app: AppHandle,
     generation: Arc<AtomicU64>,
+    /// Held while a state is decided and sent, so "show this unless something newer is up" and
+    /// delayed hides cannot interleave with a new dictation's pill.
+    gate: Arc<Mutex<()>>,
 }
 
 impl Overlay {
@@ -87,7 +90,7 @@ impl Overlay {
                 .build()?;
             window.set_ignore_cursor_events(true)?;
         }
-        Ok(Self { app: app.clone(), generation: Arc::new(AtomicU64::new(0)) })
+        Ok(Self { app: app.clone(), generation: Arc::new(AtomicU64::new(0)), gate: Arc::new(Mutex::new(())) })
     }
 
     /// The overlay window's handle (Windows), to recognise it as the foreground window and to
@@ -103,9 +106,27 @@ impl Overlay {
         }
     }
 
-    pub fn set(&self, state: State) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
+    fn gate(&self) -> MutexGuard<'_, ()> {
+        self.gate.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Show `state`. Returns its generation, for [`hide_after`](Self::hide_after).
+    pub fn set(&self, state: State) -> u64 {
+        let _gate = self.gate();
+        self.emit(state)
+    }
+
+    fn emit(&self, state: State) -> u64 {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.app.emit_to(LABEL, EVENT_STATE, &state);
+        generation
+    }
+
+    /// Show `state` unless `busy` is set (a newer dictation owns the pill), deciding and showing
+    /// in one step.
+    pub fn set_unless(&self, busy: &AtomicBool, state: State) -> Option<u64> {
+        let _gate = self.gate();
+        (!busy.load(Ordering::SeqCst)).then(|| self.emit(state))
     }
 
     pub fn level(&self, session: u64, level: f32) {
@@ -134,26 +155,33 @@ impl Overlay {
         }
     }
 
-    /// Fade out and hide after `delay`, unless the pill changed state meanwhile.
-    pub fn hide_after(&self, delay: Duration) {
-        let generation = self.generation.load(Ordering::SeqCst);
+    /// Fade out and hide after `delay`, unless the pill has shown anything after `generation`.
+    pub fn hide_after(&self, generation: u64, delay: Duration) {
         let this = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(delay);
-            if this.generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            this.set(State::Hidden);
-            let hidden = this.generation.load(Ordering::SeqCst);
+            let hidden = {
+                let _gate = this.gate();
+                if this.generation.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                this.emit(State::Hidden)
+            };
             // Let the exit animation play before the window goes.
             std::thread::sleep(Duration::from_millis(320));
+            let _gate = this.gate();
             if this.generation.load(Ordering::SeqCst) == hidden {
-                this.hide_now();
+                this.hide_window();
             }
         });
     }
 
-    pub fn hide_now(&self) {
+    /// Fade out and hide after `delay`, unless the pill changes before then.
+    pub fn hide_latest_after(&self, delay: Duration) {
+        self.hide_after(self.generation.load(Ordering::SeqCst), delay);
+    }
+
+    fn hide_window(&self) {
         self.set_interactive(false);
         #[cfg(windows)]
         if let Some(hwnd) = self.hwnd() {

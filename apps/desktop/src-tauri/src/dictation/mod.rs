@@ -72,7 +72,7 @@ enum Input {
     Stop,
     /// The pill's cancel button.
     Cancel,
-    PasteLast,
+    CopyLast,
     /// Settings changed: reconfigure the hook, autostart and warm-up.
     Reconfigure,
     Capture(bool),
@@ -124,6 +124,7 @@ impl Dictation {
                 None
             }
         };
+        sweep_clips(&app.state::<AppState>().paths.cache.join("dictation"));
         let (job_tx, job_rx) = flume::unbounded::<Job>();
         let worker = Worker { app: app.clone(), overlay: overlay.clone(), shared: shared.clone() };
         let _ = std::thread::Builder::new().name("talkr-dictation-worker".into()).spawn(move || {
@@ -161,8 +162,10 @@ impl Dictation {
         let _ = self.tx.send(Input::Cancel);
     }
 
-    pub fn paste_last(&self) {
-        let _ = self.tx.send(Input::PasteLast);
+    /// Put the last dictation on the clipboard. For the tray menu and Talkr's own buttons: a
+    /// click there leaves no text field focused to paste into.
+    pub fn copy_last(&self) {
+        let _ = self.tx.send(Input::CopyLast);
     }
 
     pub fn capture(&self, active: bool) {
@@ -183,6 +186,21 @@ impl Dictation {
             model_id,
             warm,
             has_last: lock(&self.shared.last_text).is_some(),
+        }
+    }
+}
+
+/// Delete recordings left by a dictation that never finished (Talkr quit or crashed mid-way):
+/// they are the user's voice and must not linger. Keeps the warm-up clip.
+fn sweep_clips(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let leftover = path.extension().is_some_and(|e| e == "wav") && path.file_name().is_some_and(|n| n != "warm-up.wav");
+        if leftover {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("could not delete the leftover recording {}: {}", path.display(), e);
+            }
         }
     }
 }
@@ -305,6 +323,8 @@ struct Session {
     show_at: Instant,
     settings: DictationSettings,
     model_id: String,
+    /// Ticks in a row the shortcut has not been physically held (see `tick`).
+    released_ticks: u8,
 }
 
 /// A finished recording, for the worker.
@@ -321,6 +341,7 @@ struct Clip {
 enum Job {
     Transcribe(Box<Clip>),
     PasteLast,
+    CopyLast,
 }
 
 struct Controller {
@@ -361,6 +382,15 @@ impl Controller {
         let mode = self.app.state::<AppState>().settings().dictation.mode;
         match input {
             Input::Hotkey(HotkeyEvent::DictateDown) => {
+                // Mark Win/Alt as used right away, on every press (stopping hands-free too): when
+                // they are let go, Windows must not open Start or a menu bar.
+                #[cfg(windows)]
+                {
+                    let shortcut = self.app.state::<AppState>().settings().dictation.shortcut.clone();
+                    if shortcut.win || shortcut.alt {
+                        win::keys::neutralize_modifier_release();
+                    }
+                }
                 if let Some(session) = &self.session {
                     if session.locked || mode == ActivationMode::Toggle {
                         self.finish();
@@ -404,8 +434,11 @@ impl Controller {
                     self.finish();
                 }
             }
-            Input::Hotkey(HotkeyEvent::PasteLast) | Input::PasteLast => {
+            Input::Hotkey(HotkeyEvent::PasteLast) => {
                 let _ = self.jobs.send(Job::PasteLast);
+            }
+            Input::CopyLast => {
+                let _ = self.jobs.send(Job::CopyLast);
             }
             Input::Hotkey(HotkeyEvent::Captured(shortcut)) => {
                 self.capturing = false;
@@ -476,7 +509,7 @@ impl Controller {
         if let Some(o) = &self.overlay {
             let position = self.app.state::<AppState>().settings().dictation.overlay_position;
             o.show(anchor, position);
-            o.hide_after(Duration::from_millis(2_800));
+            o.hide_latest_after(Duration::from_millis(2_800));
         }
         #[cfg(windows)]
         if self.app.state::<AppState>().settings().dictation.sounds {
@@ -489,14 +522,6 @@ impl Controller {
         let settings = state.settings().dictation.clone();
         if !settings.enabled {
             return;
-        }
-        #[cfg(windows)]
-        {
-            // Mark Win/Alt as used right away: if they are let go before the microphone opens,
-            // Windows must not open Start or a menu bar.
-            if settings.shortcut.win || settings.shortcut.alt {
-                win::keys::neutralize_modifier_release();
-            }
         }
         #[cfg(windows)]
         let target = win::target::snapshot();
@@ -576,6 +601,7 @@ impl Controller {
             show_at: if modifier_only && !locked { now + SHOW_DELAY } else { now },
             settings,
             model_id,
+            released_ticks: 0,
         });
         self.tick();
     }
@@ -608,6 +634,21 @@ impl Controller {
             self.finish();
             return;
         }
+        // Backstop for a release the hook never saw (let go while an elevated window or the lock
+        // screen had the keyboard): a held dictation whose keys are up ends as if released.
+        #[cfg(windows)]
+        if !session.locked {
+            if win::keys::shortcut_held(&session.settings.shortcut) {
+                session.released_ticks = 0;
+            } else {
+                session.released_ticks += 1;
+                if session.released_ticks >= 4 {
+                    log::info!("dictation: the shortcut is no longer held; treating it as released");
+                    self.handle(Input::Hotkey(HotkeyEvent::DictateUp));
+                    return;
+                }
+            }
+        }
         if session.started.elapsed() >= MAX_LENGTH {
             log::info!("dictation reached {} minutes; stopping", MAX_LENGTH.as_secs() / 60);
             self.finish();
@@ -633,6 +674,7 @@ impl Controller {
             win::sound::play(win::sound::Cue::Stop);
         }
         let Some(pending) = pending else {
+            let _ = std::fs::remove_file(&session.clip);
             self.pill(Pill::Notice {
                 session: session.id,
                 tone: Tone::Error,
@@ -640,7 +682,7 @@ impl Controller {
                 detail: None,
             });
             if let Some(o) = &self.overlay {
-                o.hide_after(Duration::from_millis(2_500));
+                o.hide_latest_after(Duration::from_millis(2_500));
             }
             return;
         };
@@ -679,10 +721,10 @@ impl Controller {
         if let Some(o) = &self.overlay {
             if visible && session.shown {
                 o.set(Pill::Cancelled { session: session.id });
-                o.hide_after(Duration::from_millis(650));
+                o.hide_latest_after(Duration::from_millis(650));
             } else {
                 o.set(Pill::Hidden);
-                o.hide_after(Duration::from_millis(250));
+                o.hide_latest_after(Duration::from_millis(250));
             }
         }
     }
@@ -735,13 +777,9 @@ struct Done {
 impl Worker {
     /// Show `state` unless a newer dictation is recording (its pill wins).
     fn pill(&self, state: Pill, hide_after: Option<Duration>) {
-        if self.shared.recording.load(Ordering::SeqCst) {
-            return;
-        }
         if let Some(o) = &self.overlay {
-            o.set(state);
-            if let Some(delay) = hide_after {
-                o.hide_after(delay);
+            if let (Some(generation), Some(delay)) = (o.set_unless(&self.shared.recording, state), hide_after) {
+                o.hide_after(generation, delay);
             }
         }
     }
@@ -771,6 +809,7 @@ impl Worker {
                 let _ = std::fs::remove_file(&clip);
             }
             Job::PasteLast => self.paste_last(),
+            Job::CopyLast => self.copy_last(),
         }
     }
 
@@ -913,10 +952,10 @@ impl Worker {
                 Pill::Done { session, preview: text::preview(&clean, 46), app: app_label },
                 Some(Duration::from_millis(1_150)),
             ),
-            Some(reason) => self.problem(
+            Some(ref reason) => self.problem(
                 session,
                 Tone::Warn,
-                "Copied — press Ctrl+V to paste",
+                delivery.not_inserted_title(),
                 Some(reason.to_string()),
                 settings.sounds,
             ),
@@ -933,8 +972,8 @@ impl Worker {
         use win::insert::{self, CopyReason, Outcome, Prepared};
         let owner = self.overlay.as_ref().and_then(|o| o.hwnd());
         let copy = |reason: CopyReason| {
-            win::clipboard::put_text(clean, owner.map(win::target::hwnd), false);
-            Delivery { copied: Some(reason.message().to_string()), ..Delivery::default() }
+            let copied = win::clipboard::put_text(clean, owner.map(win::target::hwnd), false).is_some();
+            Delivery { copied: Some(reason.message().to_string()), clipboard_failed: !copied, ..Delivery::default() }
         };
         let Some(target) = target else { return copy(CopyReason::NoTextField) };
         match insert::prepare(target, settings, owner.unwrap_or(0)) {
@@ -953,6 +992,7 @@ impl Worker {
                         method: Some(method.name()),
                         password,
                         copied: None,
+                        clipboard_failed: false,
                         learned_typing_for: learned_typing.then(|| ready.target.exe.clone()).filter(|e| !e.is_empty()),
                     },
                     Outcome::Copied(reason) => Delivery { password, ..copy(reason) },
@@ -990,6 +1030,30 @@ impl Worker {
         }
     }
 
+    fn copy_last(&self) {
+        let Some(text) = lock(&self.shared.last_text).clone() else {
+            self.problem(0, Tone::Info, "Nothing dictated yet", None, false);
+            return;
+        };
+        #[cfg(windows)]
+        {
+            let owner = self.overlay.as_ref().and_then(|o| o.hwnd()).map(win::target::hwnd);
+            if win::clipboard::put_text(&text, owner, false).is_some() {
+                let copied = Pill::Notice {
+                    session: 0,
+                    tone: Tone::Info,
+                    title: "Last dictation copied".into(),
+                    detail: Some("Press Ctrl+V to paste".into()),
+                };
+                self.pill(copied, Some(Duration::from_millis(2_000)));
+            } else {
+                self.problem(0, Tone::Warn, "The clipboard is busy", Some("Try again in a moment".into()), false);
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = text;
+    }
+
     fn paste_last(&self) {
         let Some(text) = lock(&self.shared.last_text).clone() else {
             self.problem(0, Tone::Info, "Nothing dictated yet", None, false);
@@ -1003,8 +1067,8 @@ impl Worker {
                 focus_policy: settings::FocusPolicy::Current,
                 ..settings.clone()
             });
-            if let Some(reason) = delivery.copied {
-                self.problem(0, Tone::Warn, "Copied — press Ctrl+V to paste", Some(reason), settings.sounds);
+            if let Some(reason) = &delivery.copied {
+                self.problem(0, Tone::Warn, delivery.not_inserted_title(), Some(reason.clone()), settings.sounds);
             }
         }
         #[cfg(not(windows))]
@@ -1022,10 +1086,21 @@ struct Delivery {
     password: bool,
     /// Why the text went to the clipboard instead.
     copied: Option<String>,
+    /// It could not even be copied (another app held the clipboard).
+    clipboard_failed: bool,
     learned_typing_for: Option<String>,
 }
 
 impl Delivery {
+    /// The pill's title when the text was not inserted.
+    fn not_inserted_title(&self) -> &'static str {
+        if self.clipboard_failed {
+            "Not inserted — press your paste-again shortcut"
+        } else {
+            "Copied — press Ctrl+V to paste"
+        }
+    }
+
     fn summary(&self) -> String {
         match (&self.copied, self.method) {
             (Some(reason), _) => format!("copied ({})", reason),

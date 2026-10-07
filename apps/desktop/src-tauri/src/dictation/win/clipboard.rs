@@ -186,6 +186,12 @@ pub fn put_text(text: &str, owner: Option<HWND>, transient: bool) -> Option<u32>
     Some(unsafe { GetClipboardSequenceNumber() })
 }
 
+/// The clipboard's change counter right now.
+pub fn sequence() -> u32 {
+    // SAFETY: plain query.
+    unsafe { GetClipboardSequenceNumber() }
+}
+
 /// Clipboard text uses Windows line breaks: classic edit boxes show a bare LF as nothing.
 pub fn crlf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\n', "\r\n")

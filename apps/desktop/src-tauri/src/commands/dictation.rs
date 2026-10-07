@@ -42,10 +42,11 @@ pub async fn dictation_cancel(dictation: State<'_, Dictation>) -> Result<()> {
     Ok(())
 }
 
-/// Insert the last dictation again where the cursor is.
+/// Copy the last dictation to the clipboard. (Inserting it again is the paste-again shortcut's
+/// job: a click in Talkr leaves no field in another app focused.)
 #[command]
-pub async fn dictation_paste_last(dictation: State<'_, Dictation>) -> Result<()> {
-    dictation.paste_last();
+pub async fn dictation_copy_last(dictation: State<'_, Dictation>) -> Result<()> {
+    dictation.copy_last();
     Ok(())
 }
 

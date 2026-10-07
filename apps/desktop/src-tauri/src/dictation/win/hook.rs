@@ -36,6 +36,8 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 /// While the settings page records a new shortcut, every key goes to it instead.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
+/// The hook thread, joined on stop so a quick stop and start cannot race.
+static THREAD: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(None);
 static EVENTS: OnceLock<flume::Sender<HotkeyEvent>> = OnceLock::new();
 
 const ENABLED_BIT: u64 = 1 << 32;
@@ -125,6 +127,13 @@ fn mods_of(down: &[u16]) -> u8 {
     down.iter().fold(0, |m, &vk| m | modifier_bit(vk))
 }
 
+/// Keep this key's press from the app, and its release too.
+fn swallow(state: &mut State, vk: u16) {
+    if !state.swallowed.contains(&vk) {
+        state.swallowed.push(vk);
+    }
+}
+
 fn remove(list: &mut Vec<u16>, vk: u16) -> bool {
     match list.iter().position(|&k| k == vk) {
         Some(i) => {
@@ -138,10 +147,17 @@ fn remove(list: &mut Vec<u16>, vk: u16) -> bool {
 /// One key event; returns whether to keep it from the focused app.
 fn handle(state: &mut State, vk: u16, down: bool, physically_down: &dyn Fn(u16) -> bool) -> bool {
     let repeat = down && state.down.contains(&vk);
+    if down && repeat && state.swallowed.contains(&vk) {
+        // Auto-repeat of a key whose press was kept from the app: keep the repeats too, even
+        // after the shortcut ended (a modifier let go first), or the app would type them.
+        return true;
+    }
     if down && !repeat {
         // A key released while another app held the keyboard (an elevated window, the secure
-        // desktop) never reached this hook: drop keys the system says are up.
+        // desktop) never reached this hook: drop keys the system says are up, so they can
+        // neither break shortcuts nor have a later press swallowed.
         state.down.retain(|&k| k == vk || physically_down(k));
+        state.swallowed.retain(|&k| k != vk && physically_down(k));
         state.down.push(vk);
     }
     if !down {
@@ -162,7 +178,7 @@ fn handle(state: &mut State, vk: u16, down: bool, physically_down: &dyn Fn(u16) 
             if !repeat {
                 emit(HotkeyEvent::Cancel);
             }
-            state.swallowed.push(vk);
+            swallow(state, vk);
             return true;
         }
         return was_swallowed;
@@ -184,12 +200,14 @@ fn dictate(state: &mut State, chord: Chord, vk: u16, down: bool, repeat: bool, m
         Some(key) => {
             if vk == key {
                 if down {
-                    if state.dictate_active {
+                    if state.dictate_active && repeat {
                         return true; // auto-repeat while held
                     }
+                    // A fresh press while "active" means the release was never seen: start over.
+                    state.dictate_active = false;
                     if !repeat && mods == chord.mods {
                         state.dictate_active = true;
-                        state.swallowed.push(vk);
+                        swallow(state, vk);
                         emit(HotkeyEvent::DictateDown);
                         return true;
                     }
@@ -243,7 +261,7 @@ fn paste_last(state: &mut State, chord: Chord, vk: u16, down: bool, repeat: bool
         Some(key) if vk == key => {
             if down && !repeat && mods == chord.mods {
                 state.paste_active = true;
-                state.swallowed.push(vk);
+                swallow(state, vk);
                 emit(HotkeyEvent::PasteLast);
                 return true;
             }
@@ -277,7 +295,7 @@ fn capture(state: &mut State, vk: u16, down: bool, repeat: bool) -> bool {
         }
         if vk == VK_ESCAPE && state.capture.is_none() {
             CAPTURING.store(false, Ordering::SeqCst);
-            state.swallowed.push(vk);
+            swallow(state, vk);
             emit(HotkeyEvent::CaptureCancelled);
             return true;
         }
@@ -286,7 +304,7 @@ fn capture(state: &mut State, vk: u16, down: bool, repeat: bool) -> bool {
         if !is_modifier(vk) {
             chord.key = Some(vk);
         }
-        state.swallowed.push(vk);
+        swallow(state, vk);
         return true;
     }
     if state.down.is_empty() {
@@ -344,7 +362,7 @@ pub fn start(events: flume::Sender<HotkeyEvent>) -> Result<(), String> {
     }
     let _ = EVENTS.set(events);
     let (ready_tx, ready_rx) = flume::bounded::<Result<(), String>>(1);
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("talkr-hotkeys".into())
         .spawn(move || {
             let mut hook = match install() {
@@ -395,17 +413,21 @@ pub fn start(events: flume::Sender<HotkeyEvent>) -> Result<(), String> {
             log::info!("dictation shortcut listener stopped");
         })
         .map_err(|e| e.to_string())?;
+    *THREAD.lock().unwrap_or_else(|e| e.into_inner()) = Some(thread);
     ready_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap_or_else(|_| Err("The dictation shortcut listener did not start".into()))
 }
 
-/// Stop the hook thread. Keys pass straight to apps again.
+/// Stop the hook thread and wait for it to end. Keys pass straight to apps again.
 pub fn stop() {
     let id = THREAD_ID.load(Ordering::SeqCst);
     if id != 0 {
         // SAFETY: posting WM_QUIT to a thread that runs a message loop.
         let _ = unsafe { PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+    }
+    if let Some(thread) = THREAD.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = thread.join();
     }
 }
 
@@ -520,6 +542,49 @@ mod tests {
         assert!(!h.key(SPACE, true));
         assert!(!h.key(SPACE, false));
         assert!(h.events().is_empty());
+    }
+
+    #[test]
+    fn a_held_key_stays_swallowed_after_its_modifier_lets_go() {
+        let s = Shortcut { ctrl: true, shift: false, alt: false, win: false, key: Some(SPACE), key_label: None };
+        let (mut h, _g) = Harness::new(Some(s), None);
+        h.key(LCTRL, true);
+        assert!(h.key(SPACE, true));
+        h.key(LCTRL, false);
+        assert_eq!(h.events(), vec![E::DictateDown, E::DictateUp]);
+        // Space still held: its repeats and release stay with the hook.
+        assert!(h.key(SPACE, true));
+        assert!(h.key(SPACE, true));
+        assert!(h.key(SPACE, false));
+        // And Space works normally afterwards.
+        assert!(!h.key(SPACE, true));
+        assert!(!h.key(SPACE, false));
+    }
+
+    #[test]
+    fn holding_escape_does_not_swallow_later_escapes() {
+        let (mut h, _g) = Harness::new(Some(Shortcut::ctrl_win()), None);
+        RECORDING.store(true, Ordering::SeqCst);
+        for _ in 0..30 {
+            assert!(h.key(VK_ESCAPE, true));
+        }
+        assert!(h.key(VK_ESCAPE, false));
+        RECORDING.store(false, Ordering::SeqCst);
+        assert!(!h.key(VK_ESCAPE, true));
+        assert!(!h.key(VK_ESCAPE, false), "a later Escape release reaches the app");
+        assert_eq!(h.events(), vec![E::Cancel]);
+    }
+
+    #[test]
+    fn a_missed_release_does_not_swallow_the_next_press() {
+        let s = Shortcut { ctrl: true, shift: false, alt: false, win: false, key: Some(SPACE), key_label: None };
+        let (mut h, _g) = Harness::new(Some(s), None);
+        h.key(LCTRL, true);
+        assert!(h.key(SPACE, true));
+        // Both releases happen while an elevated window has the keyboard: the hook never sees them.
+        h.state.down.clear();
+        h.events();
+        assert!(!h.key(SPACE, true), "a fresh Space press is typing");
     }
 
     #[test]

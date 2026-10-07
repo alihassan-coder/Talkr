@@ -51,6 +51,7 @@ export function useDictation() {
   // The newest dictation settings, including a change not rendered yet: two quick changes in a
   // row must build on each other.
   const latest = useRef<DictationSettings | null>(null)
+  const queue = useRef<Promise<unknown>>(Promise.resolve())
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
@@ -101,7 +102,12 @@ export function useDictation() {
       const mine = ++seq.current
       setSaving('saving')
       try {
-        const saved = await updateSettings({ settings: { dictation: next } })
+        // One save at a time, each sending the newest settings: two in flight could land in
+        // the wrong order and leave the older one saved.
+        const send = () => updateSettings({ settings: { dictation: latest.current ?? next } })
+        const turn = queue.current.then(send, send)
+        queue.current = turn.catch(() => undefined)
+        const saved = await turn
         if (mine === seq.current) {
           setSettings(saved)
           setSaving('saved')

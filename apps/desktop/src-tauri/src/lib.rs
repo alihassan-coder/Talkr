@@ -254,7 +254,7 @@ pub fn run() {
             dictation_capture_shortcut,
             dictation_stop,
             dictation_cancel,
-            dictation_paste_last,
+            dictation_copy_last,
             dictation_warm_up,
         ])
         .on_window_event(|window, event| {
