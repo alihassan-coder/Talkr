@@ -58,11 +58,6 @@ function Item({
         )
       }
     >
-      {/* Accent marker on the active item. */}
-      <span
-        aria-hidden="true"
-        className="absolute inset-y-2.5 left-0 w-[3px] scale-y-0 rounded-r-full bg-accent transition-transform duration-250 ease-out-quint group-aria-[current=page]/tip:scale-y-100"
-      />
       <span className="relative shrink-0">
         <Icon className="size-4 group-aria-[current=page]/tip:text-accent" strokeWidth={1.75} />
         {badge ? (
@@ -151,7 +146,9 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
 
       <div className="mt-auto space-y-3">
         {footer ? (
-          // Fixed width inside a clipping box: the card fades out instead of squashing.
+          // Fixed width inside a clipping box: the card fades out instead of squashing. The width is
+          // the expanded sidebar's content box (224px - 2 x 12px padding - 1px border); one pixel
+          // more and the clip shaves off the card's right border.
           <div
             inert={collapsed}
             aria-hidden={collapsed}
@@ -160,7 +157,7 @@ export function Sidebar({ footer }: { footer?: ReactNode }) {
               collapsed ? 'max-h-0 opacity-0' : 'max-h-40 opacity-100',
             )}
           >
-            <div className="w-50">{footer}</div>
+            <div className="w-[199px]">{footer}</div>
           </div>
         ) : null}
         <Item

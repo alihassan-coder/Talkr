@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_THEME, migrateThemeId, type ThemeId } from '@/lib/themes'
+import { normalizeHex } from '@/lib/color'
+import {
+  CUSTOM_THEME,
+  DEFAULT_CUSTOM_ACCENT,
+  DEFAULT_THEME,
+  deriveCustomTheme,
+  migrateThemeId,
+  type ThemeChoice,
+} from '@/lib/themes'
+import { DEFAULT_ZOOM, normalizeZoom } from '@/lib/zoom'
 import type { SaveFormat } from '@/lib/types'
 
 export type ColorMode = 'system' | 'light' | 'dark'
@@ -16,13 +25,20 @@ const isTextFormat = (value: unknown): value is TextFormat => TEXT_FORMATS.inclu
 type UiState = {
   sidebarCollapsed: boolean
   mode: ColorMode
-  theme: ThemeId
+  theme: ThemeChoice
+  /** Accent of the custom theme, `#rrggbb`. Kept when another theme is picked. */
+  customAccent: string
+  /** Interface zoom, one of ZOOM_LEVELS. Per device, like the rest of this store. */
+  zoom: number
   /** The audio and text formats last saved, offered first next time. */
   audioFormat: AudioFormat
   textFormat: TextFormat
   toggleSidebar: () => void
   setMode: (mode: ColorMode) => void
-  setTheme: (theme: ThemeId) => void
+  setTheme: (theme: ThemeChoice) => void
+  /** Sets the custom accent (ignored unless it is a valid hex colour). */
+  setCustomAccent: (hex: string) => void
+  setZoom: (zoom: number) => void
   rememberFormat: (format: SaveFormat) => void
 }
 
@@ -43,14 +59,26 @@ export const useUi = create<UiState>()(
       audioFormat: 'wav',
       textFormat: 'txt',
       setTheme: (theme) => set({ theme }),
+      customAccent: DEFAULT_CUSTOM_ACCENT,
+      setCustomAccent: (hex) => {
+        const customAccent = normalizeHex(hex)
+        if (customAccent) set({ customAccent })
+      },
+      zoom: DEFAULT_ZOOM,
+      setZoom: (zoom) => set({ zoom: normalizeZoom(zoom) }),
       rememberFormat: (format) => set(isAudioFormat(format) ? { audioFormat: format } : { textFormat: format }),
     }),
     {
       name: UI_STORAGE_KEY,
-      partialize: ({ sidebarCollapsed, mode, theme, audioFormat, textFormat }) => ({
+      partialize: ({ sidebarCollapsed, mode, theme, customAccent, zoom, audioFormat, textFormat }) => ({
         sidebarCollapsed,
         mode,
         theme,
+        customAccent,
+        // Derived, saved only for index.html, which paints the splash before this code loads.
+        // Never read back: the accent is the source of truth.
+        customPalette: theme === CUSTOM_THEME ? deriveCustomTheme(customAccent) : undefined,
+        zoom,
         audioFormat,
         textFormat,
       }),
@@ -61,7 +89,9 @@ export const useUi = create<UiState>()(
           ...current,
           sidebarCollapsed: p.sidebarCollapsed === true,
           mode: isMode(p.mode) ? p.mode : current.mode,
-          theme: migrateThemeId(p.theme) ?? current.theme,
+          theme: p.theme === CUSTOM_THEME ? CUSTOM_THEME : (migrateThemeId(p.theme) ?? current.theme),
+          customAccent: (typeof p.customAccent === 'string' && normalizeHex(p.customAccent)) || current.customAccent,
+          zoom: p.zoom === undefined ? current.zoom : normalizeZoom(p.zoom),
           audioFormat: isAudioFormat(p.audioFormat) ? p.audioFormat : current.audioFormat,
           textFormat: isTextFormat(p.textFormat) ? p.textFormat : current.textFormat,
         }

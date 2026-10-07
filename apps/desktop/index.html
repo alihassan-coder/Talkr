@@ -36,13 +36,37 @@
           ocean: { dark: ['#081114', '#0f1b1f', '#e0eef1'], light: ['#eef6f7', '#ffffff', '#0d2429'] },
           rose: { dark: ['#130b0e', '#1d1216', '#f6e6eb'], light: ['#fbf3f5', '#ffffff', '#2d121a'] },
         }
-        if (!palettes.hasOwnProperty(theme)) theme = 'graphite'
-        var colors = palettes[theme][mode]
+        var colors
+        // The custom theme's colours are derived in JS; the store saves them here for this script.
+        var custom = theme === 'custom' && state.customPalette && state.customPalette[mode]
+        if (custom && /^#[0-9a-f]{6}$/.test(custom.bg) && /^#[0-9a-f]{6}$/.test(custom.surface) && /^#[0-9a-f]{6}$/.test(custom.fg)) {
+          colors = [custom.bg, custom.surface, custom.fg]
+          var tokens = { bg: '--color-bg', surface: '--color-surface', fg: '--color-fg', accent: '--color-accent', onAccent: '--color-on-accent' }
+          for (var key in tokens) if (/^#[0-9a-f]{6}$/.test(custom[key])) root.style.setProperty(tokens[key], custom[key])
+        } else {
+          if (!palettes.hasOwnProperty(theme)) theme = 'graphite'
+          colors = palettes[theme][mode]
+        }
         root.setAttribute('data-theme', theme)
         root.setAttribute('data-mode', mode)
         root.style.setProperty('--splash-bg', colors[0])
         root.style.setProperty('--splash-surface', colors[1])
         root.style.setProperty('--splash-fg', colors[2])
+
+        // Interface zoom, same steps as src/lib/zoom.ts. In the app it is the webview's own
+        // zoom (the same call as getCurrentWebview().setZoom), sent while the splash is up;
+        // the browser preview uses CSS zoom.
+        try {
+          var zoom = Number(state.zoom)
+          if (zoom >= 0.8 && zoom <= 1.5 && zoom !== 1) {
+            var tauri = window.__TAURI_INTERNALS__
+            if (tauri) {
+              tauri.invoke('plugin:webview|set_webview_zoom', { label: tauri.metadata.currentWebview.label, value: zoom }).catch(function () {})
+            } else {
+              root.style.zoom = String(zoom)
+            }
+          }
+        } catch (e) {}
       })()
     </script>
     <style>

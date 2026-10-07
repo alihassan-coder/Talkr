@@ -20,7 +20,10 @@ describe('Sidebar', () => {
     renderSidebar()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(nav).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Transcribe/ })).toHaveAttribute('aria-current', 'page')
+    const active = screen.getByRole('link', { name: /Transcribe/ })
+    expect(active).toHaveAttribute('aria-current', 'page')
+    // Marked by its highlighted background alone: no accent bar beside it.
+    expect(active.querySelector('.bg-accent')).toBeNull()
     expect(screen.getByRole('link', { name: /Speak/ })).not.toHaveAttribute('aria-current')
     expect(screen.getByRole('link', { name: /Settings/ })).toHaveAttribute('href', '/settings')
   })

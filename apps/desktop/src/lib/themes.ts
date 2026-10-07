@@ -7,6 +7,8 @@
  * file: globals.css (paints the app) and the inline script in index.html
  * (paints the splash before any JS loads). Keep all three in sync.
  */
+import { contrast, hexToOklch, normalizeHex, oklchToHex } from '@/lib/color'
+
 export type Palette = {
   /** Page canvas. */
   bg: string
@@ -105,3 +107,65 @@ export const migrateThemeId = (value: unknown): ThemeId | undefined => {
 }
 
 export const findTheme = (id: ThemeId): Theme => themes.find((t) => t.id === id) ?? themes[0]
+
+/**
+ * The user's own theme: one accent colour, everything else derived. Not in
+ * globals.css or index.html's table; appearance.ts writes its tokens inline on
+ * <html>, and the ui store saves the derived palettes for index.html's splash.
+ */
+export const CUSTOM_THEME = 'custom'
+
+export type ThemeChoice = ThemeId | typeof CUSTOM_THEME
+
+export const DEFAULT_CUSTOM_ACCENT = '#3a6ff0'
+
+/** Starting points offered next to the colour picker. */
+export const ACCENT_SUGGESTIONS = ['#3a6ff0', '#7c4dff', '#d63c8a', '#e0512f', '#d9a21b', '#2f9e5b', '#0e93a8', '#6b7280']
+
+/** Contrast the accent keeps against the canvas: it doubles as icon and link colour. */
+const ACCENT_CONTRAST = 4.5
+
+/**
+ * The full light and dark palettes for one accent, built the way the themes
+ * above are: a canvas and ink barely tinted with the accent's hue, a white
+ * light-mode surface, and the accent itself wherever it already reads well.
+ * When it does not (pale yellow on white, navy on near-black) its lightness is
+ * walked toward the readable side, keeping its hue and chroma. Near-greys get
+ * the ink as accent in the mode they fail, like Graphite. The text on the
+ * accent is whichever of white and the tinted dark ink contrasts more.
+ */
+export function deriveCustomTheme(accentHex: string): { dark: Palette; light: Palette } {
+  const accent = normalizeHex(accentHex) ?? DEFAULT_CUSTOM_ACCENT
+  const { c, h } = hexToOklch(accent)
+  // Greys stay neutral; vivid accents tint the neutrals a little, never more than the built-ins do.
+  const tint = Math.min(c, 0.16) / 0.16
+  const neutral = (l: number, chroma: number) => oklchToHex({ l, c: chroma * tint, h })
+
+  const build = (mode: 'dark' | 'light'): Palette => {
+    const dark = mode === 'dark'
+    const bg = dark ? neutral(0.155, 0.02) : neutral(0.968, 0.01)
+    const surface = dark ? neutral(0.2, 0.024) : '#ffffff'
+    const fg = dark ? neutral(0.935, 0.018) : neutral(0.215, 0.045)
+    const ink = neutral(0.17, 0.035)
+
+    let tone = accent
+    if (Math.min(contrast(tone, bg), contrast(tone, surface)) < ACCENT_CONTRAST) {
+      if (c < 0.03) tone = fg
+      else {
+        const start = hexToOklch(accent)
+        for (let l = start.l; dark ? l <= 0.96 : l >= 0.2; l += dark ? 0.01 : -0.01) {
+          tone = oklchToHex({ ...start, l })
+          if (Math.min(contrast(tone, bg), contrast(tone, surface)) >= ACCENT_CONTRAST) break
+        }
+      }
+    }
+    const onAccent = contrast('#ffffff', tone) >= contrast(ink, tone) ? '#ffffff' : ink
+    return p(bg, surface, fg, tone, onAccent)
+  }
+
+  return { dark: build('dark'), light: build('light') }
+}
+
+/** The palette on screen for a theme choice and mode. */
+export const resolvePalette = (choice: ThemeChoice, customAccent: string, mode: 'light' | 'dark'): Palette =>
+  choice === CUSTOM_THEME ? deriveCustomTheme(customAccent)[mode] : findTheme(choice)[mode]

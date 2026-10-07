@@ -10,7 +10,7 @@ import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { UpdateNotice } from '@/features/updates/UpdateNotice'
 import { ShortcutsDialog } from '@/features/shortcuts/ShortcutsDialog'
-import { useApplyAppearance } from '@/lib/appearance'
+import { useApplyAppearance, useZoom } from '@/lib/appearance'
 import { useUi } from '@/stores/ui'
 
 const shortcuts: Record<string, string> = {
@@ -60,6 +60,7 @@ function isBrowserKey(e: KeyboardEvent) {
 export function App() {
   useNavigationShortcuts()
   useApplyAppearance()
+  useZoom()
   const location = useLocation()
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])

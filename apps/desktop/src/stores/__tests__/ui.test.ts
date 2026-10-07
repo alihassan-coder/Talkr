@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { deriveCustomTheme, DEFAULT_CUSTOM_ACCENT } from '@/lib/themes'
 import { UI_STORAGE_KEY, useUi } from '@/stores/ui'
 
 const saved = () => JSON.parse(localStorage.getItem(UI_STORAGE_KEY) ?? 'null') as { state: Record<string, unknown> } | null
@@ -9,7 +10,15 @@ const rehydrateFrom = async (state: unknown) => {
 }
 
 afterEach(() => {
-  useUi.setState({ sidebarCollapsed: false, mode: 'system', theme: 'graphite', audioFormat: 'wav', textFormat: 'txt' })
+  useUi.setState({
+    sidebarCollapsed: false,
+    mode: 'system',
+    theme: 'graphite',
+    customAccent: DEFAULT_CUSTOM_ACCENT,
+    zoom: 1,
+    audioFormat: 'wav',
+    textFormat: 'txt',
+  })
 })
 
 describe('ui store', () => {
@@ -35,6 +44,8 @@ describe('ui store', () => {
       sidebarCollapsed: false,
       mode: 'light',
       theme: 'ocean',
+      customAccent: DEFAULT_CUSTOM_ACCENT,
+      zoom: 1,
       audioFormat: 'wav',
       textFormat: 'txt',
     })
@@ -76,6 +87,38 @@ describe('ui store', () => {
     await rehydrateFrom({ sidebarCollapsed: 'yes', mode: 'sepia', theme: 'neon' })
     // Unknown mode/theme keep the current values; a non-boolean flag reads as expanded.
     expect(useUi.getState()).toMatchObject({ sidebarCollapsed: false, mode: 'dark', theme: 'forest' })
+  })
+
+  it('persists the custom accent and zoom, with the derived palette only for the custom theme', () => {
+    useUi.getState().setCustomAccent('#2F9E5B')
+    useUi.getState().setZoom(1.2)
+    expect(saved()?.state).toMatchObject({ customAccent: '#2f9e5b', zoom: 1.2 })
+    expect(saved()?.state.customPalette).toBeUndefined()
+    useUi.getState().setTheme('custom')
+    expect(saved()?.state.customPalette).toEqual(deriveCustomTheme('#2f9e5b'))
+  })
+
+  it('ignores an invalid custom accent and snaps zoom to a step', () => {
+    useUi.getState().setCustomAccent('#2f9e5b')
+    useUi.getState().setCustomAccent('not a colour')
+    expect(useUi.getState().customAccent).toBe('#2f9e5b')
+    useUi.getState().setZoom(9)
+    expect(useUi.getState().zoom).toBe(1.5)
+    useUi.getState().setZoom(1.04)
+    expect(useUi.getState().zoom).toBe(1)
+  })
+
+  it('restores the custom theme, accent and zoom', async () => {
+    await rehydrateFrom({ theme: 'custom', customAccent: '#D63C8A', zoom: 1.3 })
+    expect(useUi.getState()).toMatchObject({ theme: 'custom', customAccent: '#d63c8a', zoom: 1.3 })
+  })
+
+  it('falls back for invalid stored accent and zoom', async () => {
+    useUi.setState({ customAccent: '#2f9e5b', zoom: 1.1 })
+    await rehydrateFrom({ customAccent: 'purple', zoom: 'big' })
+    expect(useUi.getState()).toMatchObject({ customAccent: '#2f9e5b', zoom: 1 })
+    await rehydrateFrom({ customAccent: 42 })
+    expect(useUi.getState()).toMatchObject({ customAccent: '#2f9e5b', zoom: 1 })
   })
 
   it('survives corrupted storage', async () => {

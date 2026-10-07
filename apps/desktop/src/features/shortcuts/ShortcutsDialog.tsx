@@ -22,6 +22,14 @@ const groups = (mod: string) => [
     ],
   },
   {
+    title: 'Zoom',
+    items: [
+      { keys: [mod, '+'], label: 'Zoom in' },
+      { keys: [mod, '−'], label: 'Zoom out' },
+      { keys: [mod, '0'], label: 'Reset zoom' },
+    ],
+  },
+  {
     title: 'Speak and History',
     items: [
       { keys: [mod, '⏎'], label: 'Generate speech' },
