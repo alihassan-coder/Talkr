@@ -33,6 +33,48 @@ const previewStatus: DictationStatus = {
   hasLast: false,
 }
 
+/**
+ * In a plain browser during development, the page can be shown as another system would see it:
+ * `#/dictation?os=macos&permission=1`, `?os=wayland`, `?model=1&on=1`.
+ */
+function previewFromUrl(): { status: DictationStatus; enabled: boolean } {
+  const query = typeof window === 'undefined' ? '' : (window.location.hash.split('?')[1] ?? window.location.search.slice(1))
+  const q = new URLSearchParams(import.meta.env.DEV ? query : '')
+  const os = q.get('os')
+  const caps = { ...previewStatus.capabilities }
+  if (os === 'macos') Object.assign(caps, { os: 'macos', metaKey: '⌘', modifierOnly: true })
+  if (os === 'linux') Object.assign(caps, { os: 'linux', metaKey: 'Super', verifiesInsertion: false })
+  if (os === 'wayland')
+    Object.assign(caps, {
+      os: 'linux',
+      metaKey: 'Super',
+      holdToTalk: false,
+      modifierOnly: false,
+      recordsShortcut: false,
+      verifiesInsertion: false,
+      insertsText: false,
+      note: 'Wayland session: your desktop sets the shortcut, and text is copied for you to paste.',
+    })
+  const status: DictationStatus = {
+    ...previewStatus,
+    capabilities: caps,
+    permission: q.has('permission')
+      ? {
+          state: 'missing',
+          title: 'Accessibility',
+          detail: 'Talkr needs Accessibility access to hear your shortcut and type into other apps.',
+          canRequest: true,
+        }
+      : previewStatus.permission,
+    modelId: q.has('model') ? 'whisper-small-en-q5' : null,
+    warm: q.has('model'),
+    active: q.has('on'),
+    supported: q.get('supported') !== '0',
+  }
+  status.capabilities.supported = status.supported
+  return { status, enabled: q.has('on') }
+}
+
 /** Shown in a plain browser, where there is no backend. */
 const previewSettings: Settings = {
   version: 1,
@@ -55,9 +97,12 @@ const previewSettings: Settings = {
  */
 export function useDictation() {
   const tauri = isTauri()
-  const [settings, setSettings] = useState<Settings | null>(() => (tauri ? null : previewSettings))
+  const [preview] = useState(previewFromUrl)
+  const [settings, setSettings] = useState<Settings | null>(() =>
+    tauri ? null : { ...previewSettings, dictation: { ...previewSettings.dictation, enabled: preview.enabled } },
+  )
   const [error, setError] = useState<string | null>(null)
-  const [status, setStatus] = useState<DictationStatus>(previewStatus)
+  const [status, setStatus] = useState<DictationStatus>(preview.status)
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
   const seq = useRef(0)
   // The newest dictation settings, including a change not rendered yet: two quick changes in a
@@ -95,6 +140,7 @@ export function useDictation() {
     return () => clearTimeout(t)
   }, [saving])
 
+  /** Ask the backend again (after a permission was granted, for one). */
   const refreshStatus = useCallback(() => {
     if (!isTauri()) return
     dictationStatus()
@@ -110,7 +156,11 @@ export function useDictation() {
       const next = { ...previous, ...patch }
       latest.current = next
       setSettings((cur) => (cur ? { ...cur, dictation: { ...cur.dictation, ...patch } } : cur))
-      if (!isTauri()) return true
+      if (!isTauri()) {
+        // No backend: pretend the shortcut listener follows the switch.
+        if (patch.enabled !== undefined) setStatus((st) => ({ ...st, active: !!patch.enabled && st.supported }))
+        return true
+      }
       const mine = ++seq.current
       setSaving('saving')
       try {

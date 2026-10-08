@@ -1,0 +1,418 @@
+/*
+  The dictation pill: dark glass whatever the app's mode, lit by the theme's accent. Shared by
+  the overlay window (overlay.css) and the live preview on the Dictation page, so every rule is
+  scoped under .pill-stage. The preview passes the dark-mode accent in --pill-theme-accent, since
+  the page itself may be light.
+
+  Transparent-window safe: nothing relies on blurring what is behind the window, and shadows
+  and glow stay inside the 460 x 96 window (src-tauri/src/dictation/overlay.rs).
+*/
+
+.pill-stage {
+  --pill-accent: var(--pill-theme-accent, var(--color-accent));
+  --pill-on-accent: var(--pill-theme-on-accent, var(--color-on-accent));
+  --pill-accent-hi: color-mix(in oklab, var(--pill-accent) 72%, white);
+  --pill-fg: #f4f4f1;
+  --pill-muted: rgb(244 244 241 / 0.58);
+  --pill-faint: rgb(244 244 241 / 0.08);
+  --pill-warn: #f6bd55;
+  --pill-error: #ff8073;
+  --pill-ok: var(--pill-accent);
+  --pill-spring: cubic-bezier(0.32, 1.32, 0.52, 1);
+  --pill-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --level: 0;
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+.pill-stage .pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  max-width: 440px;
+  border-radius: 999px;
+  color: var(--pill-fg);
+  isolation: isolate;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: auto;
+  background:
+    radial-gradient(130% 160% at 50% -50%, rgb(255 255 255 / 0.11), transparent 58%),
+    linear-gradient(180deg, rgb(40 40 46 / 0.95), rgb(15 15 19 / 0.97));
+  box-shadow:
+    inset 0 0.5px 0 rgb(255 255 255 / 0.24),
+    inset 0 0 0 1px rgb(255 255 255 / 0.075),
+    0 0 0 0.5px rgb(0 0 0 / 0.55),
+    0 10px 22px -10px rgb(0 0 0 / 0.7),
+    0 2px 6px -1px rgb(0 0 0 / 0.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  backdrop-filter: blur(22px) saturate(1.6);
+  transition:
+    width 480ms var(--pill-spring),
+    opacity 220ms ease,
+    transform 380ms var(--pill-out),
+    filter 260ms ease;
+}
+
+/* A breath of accent from below while listening, swelling with the voice. */
+.pill-stage .pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(70% 120% at 50% 130%, color-mix(in oklab, var(--pill-accent) 55%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.pill-stage .pill[data-kind="listening"]::before {
+  opacity: calc(0.22 + var(--level) * 0.5);
+  transition: none;
+}
+
+.pill-stage .pill[data-visible="false"] {
+  opacity: 0;
+  transform: translateY(8px) scale(0.9);
+  filter: blur(2px);
+}
+
+.pill-stage .pill[data-visible="true"] {
+  animation: pill-in 520ms var(--pill-spring) both;
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.72);
+    filter: blur(4px);
+  }
+  55% {
+    opacity: 1;
+    filter: none;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pill-stage .pill-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  width: max-content;
+  max-width: 440px;
+  height: 100%;
+  padding: 0 15px 0 13px;
+  animation: pill-body-in 340ms var(--pill-out) both;
+}
+
+.pill-stage .pill[data-kind="listening"] .pill-body:has(.pill-actions) {
+  padding-right: 7px;
+}
+
+@keyframes pill-body-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+/* The accent glow behind the pill; its strength follows the voice. */
+.pill-stage .pill-glow {
+  position: absolute;
+  width: calc(var(--pill-w, 220px) + 40px);
+  height: 52px;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--pill-accent) 75%, transparent), transparent);
+  filter: blur(14px);
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 300ms ease,
+    transform 300ms ease,
+    width 480ms var(--pill-spring);
+  pointer-events: none;
+}
+
+.pill-stage .pill-glow[data-on="true"] {
+  opacity: calc(0.16 + var(--level) * 0.5);
+  transform: scale(calc(0.92 + var(--level) * 0.12));
+  transition: width 480ms var(--pill-spring);
+}
+
+/* ---- listening ---- */
+
+.pill-stage .pill-mic {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 999px;
+}
+
+.pill-stage .pill-mic i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pill-accent-hi);
+  box-shadow:
+    0 0 0 calc(2px + var(--level) * 5px) color-mix(in oklab, var(--pill-accent) 26%, transparent),
+    0 0 12px color-mix(in oklab, var(--pill-accent) 70%, transparent);
+}
+
+.pill-stage .pill-mic[data-locked="true"] {
+  color: var(--pill-accent-hi);
+  background: color-mix(in oklab, var(--pill-accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pill-accent) 30%, transparent);
+  animation: pill-pop 380ms var(--pill-spring) both;
+}
+
+.pill-stage .pill-wave {
+  flex: none;
+  overflow: visible;
+}
+
+.pill-stage .pill-timer {
+  min-width: 28px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  text-align: right;
+  color: var(--pill-muted);
+}
+
+.pill-stage .pill-target {
+  max-width: 128px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--pill-muted);
+  background: var(--pill-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-stage .pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+  animation: pill-body-in 300ms var(--pill-out) both;
+}
+
+.pill-stage .pill-btn {
+  display: inline-grid;
+  place-items: center;
+  height: 30px;
+  min-width: 30px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  color: var(--pill-muted);
+  background: rgb(255 255 255 / 0.07);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.pill-stage .pill-btn:hover {
+  background: rgb(255 255 255 / 0.13);
+  color: var(--pill-fg);
+}
+
+.pill-stage .pill-btn:active {
+  transform: scale(0.94);
+}
+
+.pill-stage .pill-btn:focus-visible {
+  outline: 1.5px solid var(--pill-accent-hi);
+  outline-offset: 1px;
+}
+
+.pill-stage .pill-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--pill-on-accent);
+  background: var(--pill-accent);
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.35);
+}
+
+.pill-stage .pill-primary:hover {
+  color: var(--pill-on-accent);
+  background: var(--pill-accent-hi);
+}
+
+.pill-stage .pill-stop {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* ---- working, done, notices ---- */
+
+.pill-stage .pill-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.pill-stage .pill-muted {
+  color: var(--pill-muted);
+}
+
+.pill-stage .pill-detail {
+  max-width: 220px;
+  font-size: 12px;
+  color: var(--pill-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-stage .pill-preview {
+  max-width: 270px;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-stage .pill-spinner {
+  flex: none;
+  color: var(--pill-accent-hi);
+  animation: pill-spin 900ms linear infinite;
+}
+
+@keyframes pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pill-stage .pill-shimmer {
+  background: linear-gradient(90deg, var(--pill-muted) 0%, var(--pill-fg) 45%, var(--pill-fg) 55%, var(--pill-muted) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pill-sweep 1.5s linear infinite;
+}
+
+@keyframes pill-sweep {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
+  }
+}
+
+.pill-stage .pill-badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 999px;
+  color: var(--pill-accent-hi);
+  background: color-mix(in oklab, var(--pill-accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pill-accent) 26%, transparent);
+  animation: pill-pop 420ms var(--pill-spring) both;
+}
+
+.pill-stage .pill-badge[data-tone="warn"] {
+  color: var(--pill-warn);
+  background: color-mix(in oklab, var(--pill-warn) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pill-warn) 24%, transparent);
+}
+
+.pill-stage .pill-badge[data-tone="error"] {
+  color: var(--pill-error);
+  background: color-mix(in oklab, var(--pill-error) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pill-error) 24%, transparent);
+}
+
+.pill-stage .pill-badge[data-tone="info"],
+.pill-stage .pill-badge[data-tone="muted"] {
+  color: var(--pill-muted);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+.pill-stage .pill-check path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  animation: pill-draw 420ms 140ms var(--pill-out) forwards;
+}
+
+@keyframes pill-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pill-pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-stage .pill,
+  .pill-stage .pill[data-visible="true"],
+  .pill-stage .pill-body,
+  .pill-stage .pill-actions,
+  .pill-stage .pill-badge,
+  .pill-stage .pill-mic[data-locked="true"],
+  .pill-stage .pill-shimmer,
+  .pill-stage .pill-check path {
+    animation: none !important;
+  }
+  .pill-stage .pill,
+  .pill-stage .pill-glow {
+    transition: opacity 140ms ease !important;
+  }
+  .pill-stage .pill[data-visible="false"] {
+    transform: none;
+    filter: none;
+  }
+  .pill-stage .pill-shimmer {
+    color: var(--pill-fg);
+    background: none;
+  }
+  .pill-stage .pill-check path {
+    stroke-dashoffset: 0;
+  }
+}

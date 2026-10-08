@@ -4,7 +4,9 @@ import { ArrowRight, Plus, X } from 'lucide-react'
 import type { AppMethod, AppRule, Replacement } from '@/lib/types'
 import { Badge, Button } from '@/components/ui'
 import { Select } from '@/components/Select'
-import { toExe } from '@/features/dictation/utils'
+import { toAppId } from '@/features/dictation/utils'
+import { osWords } from '@/features/dictation/platform'
+import type { Os } from '@/features/dictation/shortcut'
 
 const input =
   'h-8 min-w-0 rounded-lg border border-line bg-bg px-2.5 text-[13px] text-fg placeholder:text-subtle transition-colors focus:border-line-strong focus:outline-none'
@@ -143,10 +145,18 @@ const methodOptions: { value: AppMethod; label: string }[] = [
 ]
 
 /** How text goes into particular apps. Talkr adds rules itself when pasting fails somewhere. */
-export function AppRulesEditor({ rules, onChange }: { rules: AppRule[]; onChange: (rules: AppRule[]) => void }) {
+export function AppRulesEditor({
+  rules,
+  onChange,
+  os = 'windows',
+}: {
+  rules: AppRule[]
+  onChange: (rules: AppRule[]) => void
+  os?: Os
+}) {
   const [app, setApp] = useState('')
   const add = () => {
-    const exe = toExe(app)
+    const exe = toAppId(app, os)
     if (!exe || exe === '.exe') return
     onChange([...rules.filter((r) => r.app !== exe), { app: exe, method: 'type', learned: false }])
     setApp('')
@@ -196,7 +206,8 @@ export function AppRulesEditor({ rules, onChange }: { rules: AppRule[]; onChange
           className={`${input} flex-1 font-mono`}
           value={app}
           maxLength={120}
-          placeholder="App, e.g. mstsc.exe"
+          placeholder={osWords(os).appPlaceholder}
+          title={osWords(os).appHint}
           aria-label="App to add a rule for"
           onChange={(e) => setApp(e.target.value)}
         />

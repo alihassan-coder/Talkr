@@ -1,37 +1,18 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Keyboard, RotateCcw } from 'lucide-react'
-import { captureShortcut, isTauri, onShortcutCaptured } from '@/lib/api'
 import type { Shortcut } from '@/lib/types'
 import { Button } from '@/components/ui'
 import { cx } from '@/lib/cx'
-import { shortcutKeys, shortcutProblem } from '@/features/dictation/shortcut'
-
-/** The keys of a shortcut as keycaps. */
-export function Keys({ shortcut, size = 'md' }: { shortcut: Shortcut; size?: 'md' | 'lg' }) {
-  const keys = shortcutKeys(shortcut)
-  return (
-    <span className="inline-flex items-center gap-1" aria-label={keys.join(' plus ')}>
-      {keys.map((k, i) => (
-        <span key={`${k}-${i}`} className="inline-flex items-center gap-1" aria-hidden="true">
-          {i > 0 ? <span className="text-[11px] text-subtle">+</span> : null}
-          <kbd
-            className={cx(
-              'inline-flex items-center justify-center rounded-md border border-line-strong bg-surface font-mono font-medium text-fg shadow-[inset_0_-1.5px_0_var(--color-line-strong)]',
-              size === 'lg' ? 'h-8 min-w-8 px-2.5 text-[13px]' : 'h-6 min-w-6 px-1.5 text-[11.5px]',
-            )}
-          >
-            {k}
-          </kbd>
-        </span>
-      ))}
-    </span>
-  )
-}
+import { sameKeys, shortcutProblem } from '@/features/dictation/shortcut'
+import { isEmptyChord } from '@/features/dictation/keymap'
+import { useKeyPlatform } from '@/features/dictation/platform'
+import { Keycap, Keys } from '@/features/dictation/Keycaps'
+import { RECORD_TIMEOUT_MS, useShortcutRecorder } from '@/features/dictation/useShortcutRecorder'
 
 /**
- * Shows a shortcut and records a new one. Recording happens in Talkr's keyboard hook, so it sees
- * the Windows key and combinations the window itself would never receive. `validate` adds checks
- * beyond the shortcut's own (it must differ from the other one).
+ * Shows a shortcut and records a new one. `validate` adds checks beyond the shortcut's own (it
+ * must differ from the other shortcut). Every outcome is said out loud: recorded, refused (and
+ * why), cancelled by timeout, or the keyboard could not be listened to.
  */
 export function ShortcutField({
   label,
@@ -48,83 +29,101 @@ export function ShortcutField({
   validate?: (s: Shortcut) => string | null
   disabled?: boolean
 }) {
-  const [recording, setRecording] = useState(false)
+  const platform = useKeyPlatform()
   const [problem, setProblem] = useState<string | null>(null)
-  const recordingRef = useRef(false)
+  const [justSaved, setJustSaved] = useState(false)
 
-  const onCaptured = useEffectEvent((captured: Shortcut | null) => {
-    recordingRef.current = false
-    setRecording(false)
-    if (!captured) return
-    const issue = shortcutProblem(captured) ?? validate?.(captured) ?? null
+  const accept = (s: Shortcut) => {
+    const issue = shortcutProblem(s, platform) ?? validate?.(s) ?? null
     setProblem(issue)
-    if (!issue) onChange(captured)
-  })
+    if (issue) return
+    if (!sameKeys(s, value)) onChange(s)
+    setJustSaved(true)
+  }
+  const recorder = useShortcutRecorder(accept)
+  const { state } = recorder
 
   useEffect(() => {
-    if (!recording || !isTauri()) return
-    recordingRef.current = true
-    const unlisten = onShortcutCaptured(onCaptured)
-    captureShortcut({ active: true }).catch(() => setRecording(false))
-    // Give up after a while so keys are never held hostage.
-    const timeout = setTimeout(() => setRecording(false), 15_000)
-    return () => {
-      clearTimeout(timeout)
-      void unlisten.then((f) => f())
-      if (recordingRef.current) {
-        recordingRef.current = false
-        void captureShortcut({ active: false }).catch(() => {})
-      }
-    }
-  }, [recording])
+    if (!justSaved) return
+    const t = setTimeout(() => setJustSaved(false), 1800)
+    return () => clearTimeout(t)
+  }, [justSaved])
 
-  const isDefault = shortcutKeys(value).join() === shortcutKeys(fallback).join()
+  const isDefault = sameKeys(value, fallback)
+  const message =
+    state.phase === 'failed'
+      ? `Talkr could not listen to the keyboard: ${state.message}`
+      : state.phase === 'timedOut'
+        ? 'No keys were pressed, so the shortcut was kept.'
+        : problem
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="flex flex-col items-end gap-2">
       <div className="flex items-center gap-2">
-        {recording ? (
+        {state.phase === 'recording' ? (
           <span
             role="status"
-            className="inline-flex h-8 items-center gap-2 rounded-full border border-accent/60 bg-accent/10 px-3 text-[12.5px] text-fg"
+            aria-live="polite"
+            className="dict-recorder relative inline-flex h-9 min-w-[214px] items-center gap-2.5 overflow-hidden rounded-full border border-accent/55 bg-accent/[0.07] pl-3 pr-3.5 text-[12.5px] text-fg"
           >
-            <span className="size-1.5 animate-pulse rounded-full bg-accent" />
-            Press the new shortcut…
-            <span className="font-mono text-[10.5px] text-subtle">Esc cancels</span>
+            <span className="dict-rec-dot size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+            {isEmptyChord(state.live) ? (
+              <span className="flex-1 font-medium">Press the new shortcut…</span>
+            ) : (
+              <span className="flex-1">
+                <Keys shortcut={state.live} size="sm" pressed />
+              </span>
+            )}
+            <Keycap label="Esc" size="sm" />
+            <span className="sr-only">Escape cancels.</span>
+            <span
+              aria-hidden="true"
+              className="dict-countdown absolute inset-x-0 bottom-0 h-[2px] origin-left bg-accent/60"
+              style={{ animationDuration: `${RECORD_TIMEOUT_MS}ms` }}
+            />
           </span>
         ) : (
-          <Keys shortcut={value} />
+          <span className={cx('transition-opacity', disabled && 'opacity-50')}>
+            <Keys shortcut={value} pressed={justSaved} />
+          </span>
         )}
         <Button
           size="sm"
-          variant={recording ? 'ghost' : 'secondary'}
-          disabled={disabled || !isTauri()}
-          icon={recording ? undefined : <Keyboard className="size-3.5" strokeWidth={2} />}
-          aria-label={recording ? `Stop recording ${label}` : `Change ${label}`}
+          variant={state.phase === 'recording' ? 'ghost' : 'secondary'}
+          disabled={disabled}
+          icon={state.phase === 'recording' ? undefined : <Keyboard className="size-3.5" strokeWidth={2} />}
+          aria-label={state.phase === 'recording' ? `Stop recording ${label}` : `Change ${label}`}
           onClick={() => {
             setProblem(null)
-            setRecording((r) => !r)
+            setJustSaved(false)
+            if (state.phase === 'recording') recorder.stop()
+            else recorder.start()
           }}
         >
-          {recording ? 'Cancel' : 'Change'}
+          {state.phase === 'recording' ? 'Cancel' : 'Change'}
         </Button>
-        {!recording && !isDefault ? (
+        {state.phase !== 'recording' && !isDefault ? (
           <Button
             size="sm"
             variant="ghost"
             aria-label={`Reset ${label}`}
+            title="Reset to the default"
+            disabled={disabled}
             icon={<RotateCcw className="size-3.5" strokeWidth={2} />}
             onClick={() => {
-              const issue = validate?.(fallback) ?? null
-              setProblem(issue)
-              if (!issue) onChange(fallback)
+              recorder.clear()
+              accept(fallback)
             }}
           />
         ) : null}
       </div>
-      {problem ? (
-        <p role="alert" className="max-w-72 text-right text-[12px] leading-snug text-accent">
-          {problem}
+      {message ? (
+        <p role="alert" className="dict-warn-text max-w-80 animate-rise text-right text-[12px] leading-snug">
+          {message}
+        </p>
+      ) : justSaved ? (
+        <p role="status" className="animate-rise text-right text-[12px] text-muted">
+          Shortcut saved
         </p>
       ) : null}
     </div>

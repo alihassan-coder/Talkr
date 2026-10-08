@@ -1,0 +1,396 @@
+/*
+  The Dictation page's own effects: keycaps, the live orb, the recorder, setup's folding steps,
+  the pill preview's desk. Built only from the app's colour tokens, so every theme and mode
+  works. Warnings use one warm amber mixed with the ink, readable on light and dark.
+*/
+
+:root {
+  --dict-warn: color-mix(in oklab, #e8a33a 82%, var(--color-fg));
+  --dict-danger: color-mix(in oklab, #e5534b 82%, var(--color-fg));
+}
+
+.dict-warn-text {
+  color: var(--dict-warn);
+}
+
+/* ---- keycaps ---- */
+
+.dict-keycap {
+  background: linear-gradient(180deg, var(--color-surface), color-mix(in oklab, var(--color-surface) 88%, var(--color-fg)));
+  box-shadow:
+    inset 0 -1.5px 0 var(--color-line-strong),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.12);
+}
+
+.dict-keycap-pressed {
+  background: color-mix(in oklab, var(--color-accent) 14%, var(--color-surface));
+  box-shadow:
+    inset 0 -0.5px 0 var(--color-line-strong),
+    0 0 0 3px color-mix(in oklab, var(--color-accent) 18%, transparent);
+  transform: translateY(1px);
+}
+
+/* ---- recorder ---- */
+
+.dict-recorder {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-accent) 12%, transparent);
+  animation: dict-recorder-in 260ms var(--ease-out-quint) both;
+}
+
+@keyframes dict-recorder-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+.dict-rec-dot {
+  animation: dict-blink 1.2s ease-in-out infinite;
+  box-shadow: 0 0 8px color-mix(in oklab, var(--color-accent) 70%, transparent);
+}
+
+@keyframes dict-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.dict-countdown {
+  animation: dict-countdown linear both;
+}
+
+@keyframes dict-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* ---- hero ---- */
+
+.dict-hero-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 90% at 0% 0%, color-mix(in oklab, var(--color-accent) 16%, transparent), transparent 70%),
+    radial-gradient(40% 70% at 100% 0%, color-mix(in oklab, var(--color-accent) 7%, transparent), transparent 70%);
+  opacity: 0.35;
+  transition: opacity 900ms var(--ease-out-quint);
+}
+
+.dict-hero-wash[data-state="ready"] {
+  opacity: 1;
+}
+
+.dict-hero-wash[data-state="starting"],
+.dict-hero-wash[data-state="loading"] {
+  opacity: 0.7;
+}
+
+.dict-hero-wash[data-state="permission"],
+.dict-hero-wash[data-state="error"],
+.dict-hero-wash[data-state="noModel"] {
+  opacity: 0.5;
+  filter: hue-rotate(0deg) saturate(0);
+}
+
+.dict-live {
+  color: var(--color-subtle);
+}
+
+.dict-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.dict-live[data-tone="ok"] {
+  color: var(--color-accent);
+}
+
+.dict-live[data-tone="ok"] .dict-live-dot {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 22%, transparent);
+  animation: dict-blink 2.4s ease-in-out infinite;
+}
+
+.dict-live[data-tone="busy"] {
+  color: var(--color-muted);
+}
+
+.dict-live[data-tone="busy"] .dict-live-dot {
+  animation: dict-blink 0.9s ease-in-out infinite;
+}
+
+.dict-live[data-tone="warn"] {
+  color: var(--dict-warn);
+}
+
+/* The orb: ring, core and ripples; each state changes colour and motion, never layout. */
+.dict-orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  flex: none;
+  --orb: var(--color-accent);
+}
+
+.dict-orb > span {
+  grid-area: 1 / 1;
+}
+
+.dict-orb-core {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  color: var(--color-on-accent);
+  background:
+    radial-gradient(circle at 30% 25%, color-mix(in oklab, var(--orb) 70%, white) 0%, transparent 60%),
+    var(--orb);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    0 8px 24px -8px color-mix(in oklab, var(--orb) 70%, transparent);
+  transition:
+    background-color 500ms var(--ease-out-quint),
+    box-shadow 500ms var(--ease-out-quint),
+    color 500ms;
+}
+
+.dict-orb-ring {
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--orb) 30%, transparent);
+}
+
+.dict-orb-ripple {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1.5px solid var(--orb);
+  opacity: 0;
+}
+
+.dict-orb[data-state="ready"] .dict-orb-ripple {
+  animation: dict-ripple 3.2s var(--ease-out-quint) infinite;
+}
+
+@keyframes dict-ripple {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.75);
+  }
+}
+
+.dict-orb[data-state="starting"] .dict-orb-ring,
+.dict-orb[data-state="loading"] .dict-orb-ring {
+  border-color: transparent;
+  background: conic-gradient(from 0deg, transparent 0 62%, var(--orb) 100%) border-box;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  animation: dict-spin 1.1s linear infinite;
+}
+
+@keyframes dict-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dict-orb[data-state="off"],
+.dict-orb[data-state="unsupported"] {
+  --orb: color-mix(in oklab, var(--color-fg) 14%, var(--color-surface));
+}
+
+.dict-orb[data-state="off"] .dict-orb-core,
+.dict-orb[data-state="unsupported"] .dict-orb-core {
+  color: var(--color-muted);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+.dict-orb[data-state="starting"],
+.dict-orb[data-state="loading"] {
+  --orb: color-mix(in oklab, var(--color-accent) 75%, var(--color-surface));
+}
+
+.dict-orb[data-state="permission"],
+.dict-orb[data-state="error"],
+.dict-orb[data-state="noModel"] {
+  --orb: var(--dict-warn);
+}
+
+.dict-orb[data-state="permission"] .dict-orb-core,
+.dict-orb[data-state="error"] .dict-orb-core,
+.dict-orb[data-state="noModel"] .dict-orb-core {
+  color: #1c1405;
+}
+
+.dict-orb-bars {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 20px;
+}
+
+.dict-orb-bars i {
+  width: 3px;
+  height: 100%;
+  border-radius: 3px;
+  background: currentColor;
+  transform: scaleY(0.3);
+  transition: transform 400ms var(--ease-out-quint);
+}
+
+.dict-orb-bars i:nth-child(1),
+.dict-orb-bars i:nth-child(5) {
+  height: 50%;
+}
+
+.dict-orb-bars i:nth-child(2),
+.dict-orb-bars i:nth-child(4) {
+  height: 80%;
+}
+
+.dict-orb[data-state="ready"] .dict-orb-bars i {
+  animation: dict-voice 1.15s ease-in-out infinite alternate;
+}
+
+.dict-orb[data-state="starting"] .dict-orb-bars i,
+.dict-orb[data-state="loading"] .dict-orb-bars i {
+  transform: scaleY(0.55);
+}
+
+@keyframes dict-voice {
+  0% {
+    transform: scaleY(0.3);
+  }
+  60% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(0.5);
+  }
+}
+
+/* ---- permission ---- */
+
+.dict-permission {
+  border-color: color-mix(in oklab, var(--dict-warn) 40%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--dict-warn) 9%, transparent), transparent 70%),
+    var(--color-surface);
+}
+
+.dict-permission-icon {
+  color: var(--dict-warn);
+  background: color-mix(in oklab, var(--dict-warn) 15%, transparent);
+}
+
+/* ---- setup ---- */
+
+.dict-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 13.5px;
+  top: 30px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--color-line-strong);
+}
+
+.dict-step[data-done="true"]:not(:last-child)::before {
+  background: var(--color-accent);
+}
+
+.dict-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 420ms var(--ease-out-quint),
+    opacity 300ms ease;
+}
+
+.dict-collapse > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dict-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* ---- section index ---- */
+
+.dict-nav {
+  background: color-mix(in oklab, var(--color-bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+/* ---- pill preview ---- */
+
+.dict-desk {
+  background:
+    radial-gradient(80% 120% at 15% 110%, color-mix(in oklab, var(--pill-theme-accent) 28%, transparent), transparent 60%),
+    radial-gradient(70% 100% at 100% 0%, color-mix(in oklab, var(--pill-theme-accent) 14%, transparent), transparent 65%),
+    color-mix(in oklab, var(--color-fg) 5%, var(--color-bg));
+}
+
+.dict-desk::after {
+  /* A faint dot grid, like a desktop wallpaper. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(color-mix(in oklab, var(--color-fg) 10%, transparent) 0.8px, transparent 0.8px);
+  background-size: 14px 14px;
+  -webkit-mask: linear-gradient(180deg, #000, transparent 85%);
+  mask: linear-gradient(180deg, #000, transparent 85%);
+}
+
+.dict-desk-window {
+  z-index: 1;
+}
+
+.dict-preview-pill {
+  z-index: 2;
+}
+
+.dict-typed {
+  animation: dict-type 700ms steps(28, end) both;
+  clip-path: inset(0 0 0 0);
+}
+
+@keyframes dict-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+.dict-caret {
+  animation: var(--animate-caret);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dict-orb-ripple,
+  .dict-orb-bars i,
+  .dict-orb-ring,
+  .dict-typed,
+  .dict-rec-dot,
+  .dict-live-dot {
+    animation: none !important;
+  }
+}

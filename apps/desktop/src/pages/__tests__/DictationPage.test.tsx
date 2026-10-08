@@ -2,10 +2,11 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
+import { emit } from '@tauri-apps/api/event'
 import { DictationPage } from '@/pages/DictationPage'
 import { emitEvent, flush, hardwareFixture, mockBackend, reject, settingsFixture } from '@/test/tauri'
 import { defaultDictation } from '@/features/dictation/shortcut'
-import type { DictationSettings, DictationStatus, PartialSettings, Settings } from '@/lib/types'
+import type { DictationCapabilities, DictationSettings, DictationStatus, PartialSettings, Settings } from '@/lib/types'
 
 const status = (patch: Partial<DictationStatus> = {}): DictationStatus => ({
   supported: true,
@@ -29,7 +30,27 @@ const status = (patch: Partial<DictationStatus> = {}): DictationStatus => ({
   ...patch,
 })
 
-function backend(opts: { dictation?: Partial<DictationSettings>; status?: DictationStatus; failSave?: boolean } = {}) {
+const caps = (patch: Partial<DictationCapabilities>): DictationCapabilities => ({ ...status().capabilities, ...patch })
+
+const wayland = caps({
+  os: 'linux',
+  metaKey: 'Super',
+  holdToTalk: false,
+  modifierOnly: false,
+  recordsShortcut: false,
+  verifiesInsertion: false,
+  insertsText: false,
+  note: 'Wayland session',
+})
+
+function backend(
+  opts: {
+    dictation?: Partial<DictationSettings>
+    status?: DictationStatus | (() => DictationStatus)
+    failSave?: boolean
+    extra?: Record<string, unknown>
+  } = {},
+) {
   let settings: Settings = settingsFixture({ dictation: { ...defaultDictation, ...opts.dictation } })
   return mockBackend({
     get_settings: () => settings,
@@ -39,7 +60,8 @@ function backend(opts: { dictation?: Partial<DictationSettings>; status?: Dictat
           settings = { ...settings, ...(args.settings as PartialSettings) } as Settings
           return settings
         },
-    dictation_status: () => opts.status ?? status({ active: !!settings.dictation.enabled }),
+    dictation_status: () =>
+      typeof opts.status === 'function' ? opts.status() : (opts.status ?? status({ active: !!settings.dictation.enabled })),
     dictation_capture_shortcut: null,
     dictation_warm_up: null,
     list_installed_models: [],
@@ -50,6 +72,7 @@ function backend(opts: { dictation?: Partial<DictationSettings>; status?: Dictat
     list_catalog: [],
     get_hardware_info: hardwareFixture(),
     get_storage_usage: { modelsBytes: 0, audioBytes: 0, dbBytes: 0, totalBytes: 0 },
+    ...opts.extra,
   })
 }
 
@@ -70,11 +93,12 @@ describe('DictationPage', () => {
     const user = userEvent.setup()
     const b = backend()
     await renderPage()
-    expect(screen.getByText(/Off\. Turn it on/)).toBeInTheDocument()
+    expect(screen.getByText('Turn it on to use your voice in any app.')).toBeInTheDocument()
     await user.click(screen.getByRole('switch', { name: 'Dictation' }))
     await waitFor(() => expect(b.count('update_settings')).toBe(1))
     expect(lastDictation(b)).toEqual({ ...defaultDictation, enabled: true })
-    expect(await screen.findByText('Ready everywhere')).toBeInTheDocument()
+    // On, with the model still loading into memory.
+    expect(await screen.findByText('Loading the model')).toBeInTheDocument()
   })
 
   it('shows the shortcut and how to use it', async () => {
@@ -167,7 +191,7 @@ describe('DictationPage', () => {
   it('explains when the system is not supported', async () => {
     backend({ status: status({ supported: false }) })
     await renderPage()
-    expect(await screen.findByText(/available on Windows for now/)).toBeInTheDocument()
+    expect(await screen.findByText(/not available on Windows yet/)).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Dictation' })).toBeDisabled()
   })
 
@@ -186,5 +210,170 @@ describe('DictationPage', () => {
     await user.click(screen.getByRole('combobox', { name: 'Microphone' }))
     await user.click(await screen.findByRole('option', { name: 'USB Microphone' }))
     await waitFor(() => expect(lastDictation(b).microphone).toBe('wasapi:2'))
+  })
+
+  it('writes keys the way macOS does', async () => {
+    backend({ status: status({ capabilities: caps({ os: 'macos', metaKey: '⌘' }) }) })
+    await renderPage()
+    expect(screen.getAllByLabelText('Control plus Command').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('⌃').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('⌘').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Win')).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Open at login' })).toBeInTheDocument()
+  })
+
+  it('calls the Win key Super on Linux', async () => {
+    backend({ status: status({ capabilities: caps({ os: 'linux', metaKey: 'Super' }) }) })
+    await renderPage()
+    expect(screen.getAllByLabelText('Ctrl plus Super').length).toBeGreaterThan(0)
+  })
+
+  it('asks for a missing permission and clears once it is granted', async () => {
+    const user = userEvent.setup()
+    let granted = false
+    const b = backend({
+      status: () =>
+        status({
+          permission: granted
+            ? { state: 'granted' }
+            : { state: 'missing', title: 'Accessibility', detail: 'Talkr needs Accessibility to type for you.', canRequest: true },
+        }),
+      extra: {
+        dictation_request_permission: () => {
+          granted = true
+          return null
+        },
+      },
+    })
+    await renderPage()
+    expect(await screen.findByRole('alert', { name: 'Permission needed: Accessibility' })).toHaveTextContent(/type for you/)
+    expect(screen.getByText('Needs your permission')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Allow Accessibility' }))
+    expect(b.count('dictation_request_permission')).toBe(1)
+    await waitFor(() => expect(screen.queryByRole('alert', { name: /Permission needed/ })).toBeNull())
+  })
+
+  it('explains a desktop that chooses the shortcut and only copies text (Wayland)', async () => {
+    backend({ status: status({ capabilities: wayland }) })
+    await renderPage()
+    expect(screen.queryByRole('button', { name: 'Change dictation shortcut' })).toBeNull()
+    expect(screen.getByText('Your desktop chooses the shortcut')).toBeInTheDocument()
+    expect(screen.getByText('talkr --dictate')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy talkr --dictate' })).toBeInTheDocument()
+    expect(screen.getByText('Your words are copied, ready to paste')).toBeInTheDocument()
+    // No insertion settings or per-app rules where nothing is inserted.
+    expect(screen.queryByRole('radiogroup', { name: 'How text goes in' })).toBeNull()
+    expect(screen.queryByLabelText('App to add a rule for')).toBeNull()
+    // Press to start, press to stop: holding is not offered.
+    expect(screen.queryByRole('radiogroup', { name: 'How dictation starts' })).toBeNull()
+    expect(screen.getAllByText('Press twice').length).toBeGreaterThan(0)
+  })
+
+  it('offers only press to start and stop when the release is not reported', async () => {
+    backend({ status: status({ capabilities: caps({ holdToTalk: false }) }), dictation: { mode: 'auto' } })
+    await renderPage()
+    expect(screen.queryByRole('radiogroup', { name: 'How dictation starts' })).toBeNull()
+    expect(screen.getByText(/does not report when a shortcut is let go/)).toBeInTheDocument()
+    expect(screen.getByText(/speak, and press it again/)).toBeInTheDocument()
+    // The recorder is still there: only holding is unavailable.
+    expect(screen.getByRole('button', { name: 'Change dictation shortcut' })).toBeInTheDocument()
+  })
+
+  it('shows the system note when dictation is not supported', async () => {
+    backend({ status: status({ supported: false, capabilities: caps({ supported: false, note: 'Coming to this desktop soon' }) }) })
+    await renderPage()
+    expect(await screen.findByText('Coming to this desktop soon')).toBeInTheDocument()
+  })
+
+  it('says when the keyboard cannot be listened to', async () => {
+    const user = userEvent.setup()
+    let failed = false
+    backend({
+      dictation: { enabled: true },
+      status: () => status({ active: !failed, error: failed ? 'The keyboard hook could not start' : null }),
+      extra: {
+        // The backend answers at once with null when it cannot listen.
+        dictation_capture_shortcut: (args: Record<string, unknown>) => {
+          if (args.active) {
+            failed = true
+            void emit('dictation://captured', null)
+          }
+          return null
+        },
+      },
+    })
+    await renderPage()
+    await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
+    expect(await screen.findByText(/Talkr could not listen to the keyboard: The keyboard hook could not start/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change dictation shortcut' })).toBeInTheDocument()
+  })
+
+  it('cancels recording and lets go of the keyboard', async () => {
+    const user = userEvent.setup()
+    const b = backend({ dictation: { enabled: true } })
+    await renderPage()
+    await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
+    await waitFor(() => expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true }]))
+    await user.click(screen.getByRole('button', { name: 'Stop recording dictation shortcut' }))
+    expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true }, { active: false }])
+    expect(screen.queryByText('Press the new shortcut…')).toBeNull()
+    // Escape in the hook arrives as null: back to the shortcut, no error.
+    await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
+    await waitFor(() => expect(b.count('dictation_capture_shortcut')).toBe(3))
+    await flush()
+    await emitEvent('dictation://captured', null)
+    await waitFor(() => expect(screen.queryByText('Press the new shortcut…')).toBeNull())
+    expect(screen.queryByText(/could not listen/)).toBeNull()
+  })
+
+  it('refuses a modifier-only shortcut where the system needs a key', async () => {
+    const user = userEvent.setup()
+    const b = backend({
+      dictation: { enabled: true },
+      status: status({ capabilities: caps({ os: 'macos', metaKey: '⌘', modifierOnly: false }) }),
+    })
+    await renderPage()
+    await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
+    await flush()
+    await emitEvent('dictation://captured', { ctrl: true, shift: false, alt: false, win: true, key: null, keyLabel: null })
+    expect(await screen.findByText('This system needs a key with the modifiers, like ⌃⌘Space.')).toBeInTheDocument()
+    expect(b.count('update_settings')).toBe(0)
+  })
+
+  it('resets a changed shortcut to the default', async () => {
+    const user = userEvent.setup()
+    const b = backend({ dictation: { shortcut: { ctrl: true, shift: false, alt: true, win: false, key: 32, keyLabel: 'Space' } } })
+    await renderPage()
+    await user.click(screen.getByRole('button', { name: 'Reset dictation shortcut' }))
+    await waitFor(() => expect(lastDictation(b).shortcut).toEqual(defaultDictation.shortcut))
+  })
+
+  it('guides first-run setup and folds it away when skipped', async () => {
+    const user = userEvent.setup()
+    backend()
+    await renderPage()
+    expect(screen.getByText('Get set up')).toBeInTheDocument()
+    expect(screen.getByText('1 of 3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Use this' }))
+    expect(screen.getByText('2 of 3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Turn on dictation' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Skip setup' }))
+    expect(screen.queryByText('Get set up')).toBeNull()
+  })
+
+  it('previews every state of the pill', async () => {
+    const user = userEvent.setup()
+    backend()
+    await renderPage()
+    const pill = () => document.querySelector('.dict-preview-pill .pill')!
+    expect(pill()).toHaveAccessibleName('Listening')
+    await user.click(screen.getByRole('button', { name: 'Inserted' }))
+    expect(pill()).toHaveAccessibleName('Inserted: Let’s ship the new onboarding on Friday.')
+    await user.click(screen.getByRole('button', { name: 'Hands-free' }))
+    expect(pill()).toHaveAccessibleName('Dictating hands-free')
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+    expect(pill()).toHaveAccessibleName('Transcribing')
+    await user.click(screen.getByRole('button', { name: 'Copied' }))
+    expect(pill()).toHaveAccessibleName(/Copied, press Ctrl \+ V to paste/)
   })
 })
