@@ -195,8 +195,10 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: |
           mkdir -p binaries ../dist
-          touch binaries/talkr-engine-x86_64-unknown-linux-gnu
-          chmod +x binaries/talkr-engine-x86_64-unknown-linux-gnu
+          for bin in talkr-engine talkr-engine-gpu; do
+            touch "binaries/$bin-x86_64-unknown-linux-gnu"
+            chmod +x "binaries/$bin-x86_64-unknown-linux-gnu"
+          done
       - name: X11 integration tests
         working-directory: apps/desktop/src-tauri
         run: |
