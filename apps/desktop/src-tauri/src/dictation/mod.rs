@@ -47,6 +47,10 @@ use sys::{Os, Target};
 /// Main-window events.
 pub const EVENT_STATUS: &str = "dictation://status";
 pub const EVENT_CAPTURED: &str = "dictation://captured";
+/// The keys held so far while recording a shortcut (payload: Shortcut).
+pub const EVENT_CAPTURING: &str = "dictation://capturing";
+/// Recording a shortcut could not start (payload: { message }).
+pub const EVENT_CAPTURE_FAILED: &str = "dictation://capture-failed";
 pub const EVENT_SETTINGS: &str = "dictation://settings";
 pub const EVENT_DONE: &str = "dictation://done";
 
@@ -81,6 +85,8 @@ pub enum HotkeyEvent {
     /// Escape while recording.
     Cancel,
     PasteLast,
+    /// While recording a new shortcut: the keys held so far, for the page to show live.
+    Capturing(Shortcut),
     Captured(Shortcut),
     CaptureCancelled,
 }
@@ -98,6 +104,11 @@ enum Input {
     /// Settings changed: reconfigure the listener, autostart and warm-up.
     Reconfigure,
     Capture(bool),
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CaptureFailed {
+    message: String,
 }
 
 /// For the settings page.
@@ -118,6 +129,8 @@ pub struct Status {
     /// That model is loaded and ready.
     pub warm: bool,
     pub has_last: bool,
+    /// A dictation is recording right now.
+    pub recording: bool,
 }
 
 /// Managed state: the controller's inbox and what the settings page can ask about.
@@ -223,6 +236,7 @@ impl Dictation {
             model_id,
             warm,
             has_last: lock(&self.shared.last_text).is_some(),
+            recording: self.shared.recording.load(Ordering::SeqCst),
         }
     }
 }
@@ -471,6 +485,9 @@ impl Controller {
             Input::CopyLast => {
                 let _ = self.jobs.send(Job::CopyLast);
             }
+            Input::Hotkey(HotkeyEvent::Capturing(shortcut)) => {
+                let _ = self.app.emit(EVENT_CAPTURING, shortcut);
+            }
             Input::Hotkey(HotkeyEvent::Captured(shortcut)) => {
                 self.capturing = false;
                 let _ = self.app.emit(EVENT_CAPTURED, Some(shortcut));
@@ -486,9 +503,9 @@ impl Controller {
                 if active {
                     if let Err(e) = Os::start_hotkeys(self.hotkeys.clone()) {
                         *lock(&self.shared.error) = Some(e.clone());
-                        // The page is waiting for a shortcut that cannot come: tell it.
+                        // The page is waiting for a shortcut that cannot come: tell it why.
                         self.capturing = false;
-                        let _ = self.app.emit(EVENT_CAPTURED, Option::<Shortcut>::None);
+                        let _ = self.app.emit(EVENT_CAPTURE_FAILED, CaptureFailed { message: e });
                     }
                 }
                 Os::set_capturing(self.capturing);
@@ -605,6 +622,7 @@ impl Controller {
                 o.set_interactive(true);
             }
         }
+        emit_status(&self.app);
         self.session = Some(Session {
             id,
             started: now,
@@ -673,6 +691,7 @@ impl Controller {
             o.set_interactive(false);
         }
         let pending = self.app.state::<AppState>().recorder().request_stop().ok();
+        emit_status(&self.app);
         Some((session, pending))
     }
 

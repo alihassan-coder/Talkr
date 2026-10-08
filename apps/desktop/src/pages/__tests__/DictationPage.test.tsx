@@ -27,6 +27,7 @@ const status = (patch: Partial<DictationStatus> = {}): DictationStatus => ({
   modelId: 'whisper-small-en-q5',
   warm: false,
   hasLast: false,
+  recording: false,
   ...patch,
 })
 
@@ -285,6 +286,22 @@ describe('DictationPage', () => {
     expect(await screen.findByText('Coming to this desktop soon')).toBeInTheDocument()
   })
 
+  it('shows the keys as they are pressed while recording', async () => {
+    const user = userEvent.setup()
+    backend({
+      dictation: { enabled: true },
+      extra: {
+        dictation_capture_shortcut: (args: Record<string, unknown>) => {
+          if (args.active) void emit('dictation://capturing', { ctrl: true, shift: false, alt: true, win: false, key: null, keyLabel: null })
+          return null
+        },
+      },
+    })
+    await renderPage()
+    await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
+    expect(await screen.findByLabelText(/Ctrl plus Alt/)).toBeInTheDocument()
+  })
+
   it('says when the keyboard cannot be listened to', async () => {
     const user = userEvent.setup()
     let failed = false
@@ -292,11 +309,11 @@ describe('DictationPage', () => {
       dictation: { enabled: true },
       status: () => status({ active: !failed, error: failed ? 'The keyboard hook could not start' : null }),
       extra: {
-        // The backend answers at once with null when it cannot listen.
+        // The backend answers at once when it cannot listen.
         dictation_capture_shortcut: (args: Record<string, unknown>) => {
           if (args.active) {
             failed = true
-            void emit('dictation://captured', null)
+            void emit('dictation://capture-failed', { message: 'The keyboard hook could not start' })
           }
           return null
         },

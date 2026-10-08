@@ -157,6 +157,8 @@ export interface DictationStatus {
   /** That model is loaded and ready. */
   warm: boolean
   hasLast: boolean
+  /** A dictation is recording right now. */
+  recording: boolean
 }
 
 export interface Microphone {

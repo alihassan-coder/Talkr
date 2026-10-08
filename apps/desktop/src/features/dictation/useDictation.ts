@@ -31,6 +31,7 @@ const previewStatus: DictationStatus = {
   modelId: null,
   warm: false,
   hasLast: false,
+  recording: false,
 }
 
 /**

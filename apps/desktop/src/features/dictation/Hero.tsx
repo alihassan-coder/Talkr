@@ -158,6 +158,8 @@ function headline(state: LiveState, caps: DictationCapabilities, status: Dictati
       return 'Loading the speech model so your first words come back fast.'
     case 'ready':
       return ''
+    case 'listening':
+      return 'Speak now. Let go of the shortcut, or press it again, to insert.'
   }
 }
 

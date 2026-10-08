@@ -102,6 +102,8 @@ describe('api events', () => {
       micError: 'mic://error',
       dictationStatus: 'dictation://status',
       dictationCaptured: 'dictation://captured',
+      dictationCapturing: 'dictation://capturing',
+      dictationCaptureFailed: 'dictation://capture-failed',
       dictationSettings: 'dictation://settings',
       dictationDone: 'dictation://done',
     })

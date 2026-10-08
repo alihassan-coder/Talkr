@@ -305,6 +305,17 @@ fn paste_last(state: &mut State, chord: Chord, vk: u16, down: bool, repeat: bool
     }
 }
 
+fn chord_shortcut(chord: Chord) -> Shortcut {
+    Shortcut {
+        ctrl: chord.mods & CTRL != 0,
+        shift: chord.mods & SHIFT != 0,
+        alt: chord.mods & ALT != 0,
+        win: chord.mods & WIN != 0,
+        key: chord.key,
+        key_label: chord.key.map(keys::key_label),
+    }
+}
+
 /// Recording a new shortcut: every key is kept from the apps, and the combination is reported
 /// once all keys are up. Escape alone cancels.
 fn capture(state: &mut State, vk: u16, down: bool, repeat: bool) -> bool {
@@ -323,20 +334,16 @@ fn capture(state: &mut State, vk: u16, down: bool, repeat: bool) -> bool {
         if !is_modifier(vk) {
             chord.key = Some(vk);
         }
+        // The page shows the keys as they go down: it cannot see them itself, they are kept
+        // from every app while recording.
+        emit(HotkeyEvent::Capturing(chord_shortcut(*chord)));
         swallow(state, vk);
         return true;
     }
     if state.down.is_empty() {
         if let Some(chord) = state.capture.take() {
             CAPTURING.store(false, Ordering::SeqCst);
-            emit(HotkeyEvent::Captured(Shortcut {
-                ctrl: chord.mods & CTRL != 0,
-                shift: chord.mods & SHIFT != 0,
-                alt: chord.mods & ALT != 0,
-                win: chord.mods & WIN != 0,
-                key: chord.key,
-                key_label: chord.key.map(keys::key_label),
-            }));
+            emit(HotkeyEvent::Captured(chord_shortcut(chord)));
         }
     }
     // Releases of keys pressed before capture began belong to the app.
@@ -682,9 +689,14 @@ mod tests {
         assert!(h.key(SPACE, true));
         h.key(SPACE, false);
         h.key(keys::VK_LMENU, false);
-        assert!(h.events().is_empty(), "reported once everything is up");
+        let mut events = h.events();
+        assert!(!events.iter().any(|e| matches!(e, E::Captured(_))), "reported once everything is up");
         h.key(LCTRL, false);
-        match h.events().as_slice() {
+        events.extend(h.events());
+        let progress: Vec<_> = events.iter().filter(|e| matches!(e, E::Capturing(_))).collect();
+        assert_eq!(progress.len(), 3, "one progress report per key: {events:?}");
+        assert!(matches!(progress[2], E::Capturing(s) if s.ctrl && s.alt && s.key == Some(SPACE)));
+        match events.iter().filter(|e| !matches!(e, E::Capturing(_))).collect::<Vec<_>>().as_slice() {
             [E::Captured(s)] => {
                 assert!(s.ctrl && s.alt && !s.shift && !s.win);
                 assert_eq!(s.key, Some(SPACE));

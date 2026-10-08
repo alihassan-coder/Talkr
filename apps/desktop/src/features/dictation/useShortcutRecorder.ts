@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { captureShortcut, dictationStatus, isTauri, onShortcutCaptured } from '@/lib/api'
+import { captureShortcut, isTauri, onCaptureFailed, onShortcutCaptured, onShortcutCapturing } from '@/lib/api'
 import type { Shortcut } from '@/lib/types'
 import { errorText } from '@/lib/errors'
 import { addKey, emptyShortcut, isEmptyChord } from '@/features/dictation/keymap'
@@ -18,12 +18,13 @@ let activeStop: (() => void) | null = null
 
 /**
  * Records a shortcut. In the app the keyboard hook does it (it sees the Win key and chords the
- * window would never get) and reports through `dictation://captured`; the keys shown live come
- * from the window, when the system lets it see them. In a plain browser the window's own key
- * events record it, so the page can be tried without the backend.
+ * window would never get): it reports the keys held so far through `dictation://capturing`, the
+ * result through `dictation://captured` (`null` for Escape), and `dictation://capture-failed`
+ * when the system will not let Talkr listen. In a plain browser the window's own key events
+ * record it, so the page can be tried without the backend.
  *
- * The listener is attached before capture starts: a backend that cannot listen answers at once
- * with `null`, and that answer must not be missed.
+ * The listeners are attached before capture starts: a backend that cannot listen answers at
+ * once, and that answer must not be missed.
  */
 export function useShortcutRecorder(onRecorded: (s: Shortcut) => void) {
   const [state, setState] = useState<RecorderState>({ phase: 'idle' })
@@ -40,7 +41,6 @@ export function useShortcutRecorder(onRecorded: (s: Shortcut) => void) {
   const start = () => {
     activeStop?.()
     const tauri = isTauri()
-    const startedAt = performance.now()
     const cleanups: (() => void)[] = []
     let over = false
 
@@ -87,19 +87,18 @@ export function useShortcutRecorder(onRecorded: (s: Shortcut) => void) {
     })
 
     if (!tauri) return
-    let unlisten: (() => void) | null = null
-    cleanups.push(() => unlisten?.())
-    onShortcutCaptured((captured) => {
-      if (captured) return end({ phase: 'idle' }, captured, false)
-      // Escape, or a backend that could not listen: the status says which.
-      const quick = performance.now() - startedAt < 1500
-      dictationStatus()
-        .then((s) => end(quick && s.error ? { phase: 'failed', message: s.error } : { phase: 'idle' }, undefined, false))
-        .catch(() => end({ phase: 'idle' }, undefined, false))
-    })
-      .then((f) => {
-        if (over) return f()
-        unlisten = f
+    const unlistens: (() => void)[] = []
+    cleanups.push(() => unlistens.splice(0).forEach((f) => f()))
+    Promise.all([
+      onShortcutCaptured((captured) => end({ phase: 'idle' }, captured ?? undefined, false)),
+      onShortcutCapturing((live) => {
+        if (!over) setState({ phase: 'recording', live })
+      }),
+      onCaptureFailed((message) => end({ phase: 'failed', message }, undefined, false)),
+    ])
+      .then((fs) => {
+        if (over) return fs.forEach((f) => f())
+        unlistens.push(...fs)
         return captureShortcut({ active: true })
       })
       .catch((e: unknown) => end({ phase: 'failed', message: errorText(e) }))

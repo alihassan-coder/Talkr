@@ -77,11 +77,13 @@ describe('live state', () => {
     modelId: 'm',
     warm: true,
     hasLast: false,
+  recording: false,
   }
   const on = { ...defaultDictation, enabled: true }
 
   it('puts the most urgent first', () => {
     expect(liveState(base, on)).toBe('ready')
+    expect(liveState({ ...base, recording: true }, on)).toBe('listening')
     expect(liveState({ ...base, warm: false }, on)).toBe('loading')
     expect(liveState({ ...base, active: false }, on)).toBe('starting')
     expect(liveState({ ...base, modelId: null }, on)).toBe('noModel')

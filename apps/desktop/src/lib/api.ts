@@ -177,6 +177,8 @@ export const EVENTS = {
   micError: 'mic://error',
   dictationStatus: 'dictation://status',
   dictationCaptured: 'dictation://captured',
+  dictationCapturing: 'dictation://capturing',
+  dictationCaptureFailed: 'dictation://capture-failed',
   dictationSettings: 'dictation://settings',
   dictationDone: 'dictation://done',
 } as const
@@ -208,6 +210,14 @@ export const onDictationStatus = (cb: (s: DictationStatus) => void): Promise<Unl
   listen<DictationStatus>(EVENTS.dictationStatus, (e) => cb(e.payload))
 
 /** The recorded shortcut, or null when recording it was cancelled (Escape). */
+/** While recording a shortcut: the keys held so far (the keyboard hook keeps them from the window). */
+export const onShortcutCapturing = (cb: (s: Shortcut) => void): Promise<UnlistenFn> =>
+  listen<Shortcut>(EVENTS.dictationCapturing, (e) => cb(e.payload))
+
+/** Recording a shortcut could not start: the system would not let Talkr listen. */
+export const onCaptureFailed = (cb: (message: string) => void): Promise<UnlistenFn> =>
+  listen<{ message: string }>(EVENTS.dictationCaptureFailed, (e) => cb(e.payload.message))
+
 export const onShortcutCaptured = (cb: (s: Shortcut | null) => void): Promise<UnlistenFn> =>
   listen<Shortcut | null>(EVENTS.dictationCaptured, (e) => cb(e.payload))
 

@@ -10,6 +10,7 @@ export type LiveState =
   | 'starting'
   | 'loading'
   | 'ready'
+  | 'listening'
 
 export function liveState(status: DictationStatus, dictation: DictationSettings): LiveState {
   if (!status.supported) return 'unsupported'
@@ -18,6 +19,7 @@ export function liveState(status: DictationStatus, dictation: DictationSettings)
   if (status.error) return 'error'
   if (!status.modelId) return 'noModel'
   if (!status.active) return 'starting'
+  if (status.recording) return 'listening'
   if (dictation.keepWarm && !status.warm) return 'loading'
   return 'ready'
 }
@@ -32,4 +34,5 @@ export const liveCopy: Record<LiveState, { label: string; tone: 'ok' | 'idle' | 
   starting: { label: 'Starting', tone: 'busy' },
   loading: { label: 'Loading the model', tone: 'busy' },
   ready: { label: 'Ready everywhere', tone: 'ok' },
+  listening: { label: 'Listening', tone: 'ok' },
 }
