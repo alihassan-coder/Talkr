@@ -146,6 +146,10 @@ wl-clipboard-rs = "0.9"
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
+# X11 backend tests: XInput finds the server's own keyboard device, to press keys as the user.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = { version = "0.14", default-features = false, features = ["xinput"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # An independent decoder that checks the FLAC exporter round-trips samples exactly.

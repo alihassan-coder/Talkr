@@ -677,6 +677,13 @@ impl Controller {
                 Some(&settings.shortcut),
                 settings.paste_last_enabled.then_some(&settings.paste_last_shortcut),
             );
+            if let Some(problem) = Os::hotkeys_problem() {
+                let mut error = lock(&self.shared.error);
+                if error.is_none() {
+                    log::warn!("{}", problem);
+                    *error = Some(problem);
+                }
+            }
         } else {
             Os::configure_hotkeys(None, None);
             if !self.capturing {
