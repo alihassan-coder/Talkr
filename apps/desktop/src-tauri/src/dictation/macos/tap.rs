@@ -23,6 +23,8 @@ static PASTE_LAST: AtomicU64 = AtomicU64::new(0);
 static RECORDING: AtomicBool = AtomicBool::new(false);
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
+/// The dictation key shortcut is held, as the listener saw it (see `Machine::dictate_held`).
+static DICTATE_HELD: AtomicBool = AtomicBool::new(false);
 /// Asks the listener thread to end.
 static STOP: AtomicBool = AtomicBool::new(false);
 /// Dictation wants the listener: when it could not start for want of permission, it starts as
@@ -63,6 +65,12 @@ pub fn is_running() -> bool {
     RUNNING.load(Ordering::SeqCst)
 }
 
+/// Whether the key of a key shortcut for dictation is held, as far as the listener knows. The
+/// listener keeps that key from apps, so the system's key state may never show it down.
+pub fn dictate_held() -> bool {
+    DICTATE_HELD.load(Ordering::SeqCst)
+}
+
 fn config() -> Config {
     Config {
         dictate: Chord::decode(DICTATE.load(Ordering::Relaxed)),
@@ -87,6 +95,11 @@ fn typed(event: CGEventRef) -> String {
     String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())])
 }
 
+/// Whether the listener last saw the Mac key `code` go down.
+fn was_down(code: u16) -> bool {
+    MACHINE.with(|m| m.borrow().is_down(keymap::vk_from_mac(code)))
+}
+
 /// One event from the tap; returns whether to keep it from the apps.
 fn on_event(kind: u32, event: CGEventRef) -> bool {
     // SAFETY: `event` is valid for the duration of the callback.
@@ -103,7 +116,7 @@ fn on_event(kind: u32, event: CGEventRef) -> bool {
     let (vk, down) = match kind {
         ffi::KEY_DOWN => (keymap::vk_from_mac(code), true),
         ffi::KEY_UP => (keymap::vk_from_mac(code), false),
-        ffi::FLAGS_CHANGED => match keymap::modifier_change(code, flags) {
+        ffi::FLAGS_CHANGED => match keymap::modifier_change(code, flags, was_down(code)) {
             Some(change) => change,
             None => return false, // Caps Lock, Fn
         },
@@ -125,7 +138,12 @@ fn on_event(kind: u32, event: CGEventRef) -> bool {
             .with(|l| l.borrow().as_ref().filter(|(k, _)| *k == vk).map(|(_, label)| label.clone()))
             .unwrap_or_else(|| keymap::key_label(vk))
     };
-    let step = MACHINE.with(|m| m.borrow_mut().handle(&config, vk, down, &physically_down, &label));
+    let step = MACHINE.with(|m| {
+        let mut machine = m.borrow_mut();
+        let step = machine.handle(&config, vk, down, &physically_down, &label);
+        DICTATE_HELD.store(machine.dictate_held(), Ordering::SeqCst);
+        step
+    });
     if step.capture_ended {
         CAPTURING.store(false, Ordering::SeqCst);
         CAPTURE_LABEL.with(|l| *l.borrow_mut() = None);
@@ -139,9 +157,10 @@ fn on_event(kind: u32, event: CGEventRef) -> bool {
 unsafe extern "C" fn callback(_proxy: *mut c_void, kind: u32, event: CGEventRef, _info: *mut c_void) -> CGEventRef {
     if kind == ffi::TAP_DISABLED_BY_TIMEOUT || kind == ffi::TAP_DISABLED_BY_USER_INPUT {
         // macOS turned the tap off (a slow callback, or secure input): turn it back on. Releases
-        // missed meanwhile are caught by the machine's check of what is really held.
+        // missed meanwhile are caught by the machine's check of what is really held. Without
+        // permission (it was just taken away) the listener's loop ends it instead.
         let tap = TAP.load(Ordering::SeqCst);
-        if !tap.is_null() {
+        if !tap.is_null() && ffi::trusted() {
             // SAFETY: the tap stays valid while the listener thread, which runs this, lives.
             unsafe { ffi::CGEventTapEnable(tap, true) };
         }
@@ -211,6 +230,7 @@ fn run(ready: flume::Sender<Result<(), String>>) {
         ));
         return;
     }
+    let mut revoked = false;
     // SAFETY: the tap is valid; the source and run loop belong to this thread, and everything
     // created here is released below, after the loop ends.
     unsafe {
@@ -228,14 +248,27 @@ fn run(ready: flume::Sender<Result<(), String>>) {
 
         while !STOP.load(Ordering::SeqCst) {
             ffi::CFRunLoopRunInMode(ffi::kCFRunLoopDefaultMode, 1.0, 0);
-            // A tap macOS disabled without telling the callback stays off: check every second.
-            if !ffi::CGEventTapIsEnabled(tap) && !STOP.load(Ordering::SeqCst) {
-                log::info!("the dictation shortcut listener was disabled; turning it back on");
-                ffi::CGEventTapEnable(tap, true);
+            if STOP.load(Ordering::SeqCst) {
+                break;
+            }
+            // Checked every second: macOS can disable a tap without telling the callback, and
+            // the user can take the permission away while Talkr runs.
+            match health(ffi::trusted(), ffi::CGEventTapIsEnabled(tap)) {
+                Health::Fine => {}
+                Health::Disabled => {
+                    log::info!("the dictation shortcut listener was disabled; turning it back on");
+                    ffi::CGEventTapEnable(tap, true);
+                }
+                Health::Revoked => {
+                    log::warn!("Accessibility was turned off for Talkr: the dictation shortcut stops until it is allowed again");
+                    revoked = true;
+                    break;
+                }
             }
         }
 
         RUNNING.store(false, Ordering::SeqCst);
+        DICTATE_HELD.store(false, Ordering::SeqCst);
         ffi::CGEventTapEnable(tap, false);
         TAP.store(std::ptr::null_mut(), Ordering::SeqCst);
         ffi::CFRunLoopRemoveSource(run_loop, source, ffi::kCFRunLoopCommonModes);
@@ -249,6 +282,29 @@ fn run(ready: flume::Sender<Result<(), String>>) {
     }
     MACHINE.with(|m| *m.borrow_mut() = Machine::default());
     log::info!("dictation shortcut listener stopped");
+    if revoked {
+        // Dictation still wants the listener: start it again the moment permission is back.
+        wait_for_permission();
+    }
+}
+
+/// What the listener's once-a-second check found.
+#[derive(Debug, PartialEq, Eq)]
+enum Health {
+    Fine,
+    /// macOS turned the tap off: turn it back on.
+    Disabled,
+    /// Accessibility was taken away: the tap is dead (re-enabling it would do nothing, for
+    /// good), so the listener ends and waits for the permission to come back.
+    Revoked,
+}
+
+fn health(trusted: bool, enabled: bool) -> Health {
+    match (trusted, enabled) {
+        (false, _) => Health::Revoked,
+        (true, false) => Health::Disabled,
+        (true, true) => Health::Fine,
+    }
 }
 
 /// Stop the listener and wait for it to end. Keys pass straight to apps again.
@@ -356,12 +412,31 @@ mod tests {
         assert!(is_running());
         start(flume::unbounded().0).expect("starting again is harmless");
         press(0x50, true);
+        let pressed = rx.recv_timeout(Duration::from_secs(3)).ok();
+        let held = dictate_held();
+        // Does the system's key state show a key the tap kept from apps? Logged for the record:
+        // `shortcut_held` asks the listener instead, so it does not depend on the answer.
+        {
+            use std::io::Write;
+            let system = keys::key_held(0x50);
+            let _ = writeln!(std::io::stderr(), "a swallowed key in the combined session key state: held = {system}");
+        }
         press(0x50, false);
-        let events: Vec<HotkeyEvent> = (0..2).filter_map(|_| rx.recv_timeout(Duration::from_secs(3)).ok()).collect();
+        let released = rx.recv_timeout(Duration::from_secs(3)).ok();
+        let held_after = dictate_held();
         stop();
         configure(None, None);
         assert!(!is_running());
-        assert_eq!(events, vec![HotkeyEvent::DictateDown, HotkeyEvent::DictateUp]);
+        assert_eq!((pressed, released), (Some(HotkeyEvent::DictateDown), Some(HotkeyEvent::DictateUp)));
+        assert!(held && !held_after, "the listener knows the key is held, then let go");
+    }
+
+    #[test]
+    fn the_listener_ends_when_permission_is_taken_away() {
+        assert_eq!(health(true, true), Health::Fine);
+        assert_eq!(health(true, false), Health::Disabled, "turned back on");
+        assert_eq!(health(false, true), Health::Revoked, "a tap without permission hears nothing");
+        assert_eq!(health(false, false), Health::Revoked, "and is never turned back on");
     }
 
     #[test]

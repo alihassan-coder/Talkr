@@ -91,6 +91,7 @@ extern "C" {
     ) -> CFStringRef;
     pub fn CFStringGetLength(string: CFStringRef) -> CFIndex;
     pub fn CFStringGetCharacters(string: CFStringRef, range: CFRange, buffer: *mut u16);
+    pub fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
     pub fn CFDictionaryCreate(
         alloc: CFTypeRef,
         keys: *const CFTypeRef,
@@ -161,7 +162,27 @@ extern "C" {
 
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
+    pub static kTISPropertyUnicodeKeyLayoutData: CFStringRef;
+
     pub fn IsSecureEventInputEnabled() -> u8;
+    /// Main thread only (macOS 14 stops a process that asks from another thread).
+    pub fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
+    /// Not retained ("Get" rule): valid while the input source is.
+    pub fn TISGetInputSourceProperty(source: CFTypeRef, key: CFStringRef) -> CFTypeRef;
+    pub fn LMGetKbdType() -> u8;
+    #[allow(clippy::too_many_arguments)]
+    pub fn UCKeyTranslate(
+        layout: *const c_void,
+        code: u16,
+        action: u16,
+        modifiers: u32,
+        keyboard_type: u32,
+        options: u32,
+        dead_key_state: *mut u32,
+        max: c_ulong,
+        actual: *mut c_ulong,
+        chars: *mut u16,
+    ) -> i32;
 }
 
 /// An owned Core Foundation object, released when dropped.

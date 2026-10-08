@@ -23,9 +23,11 @@ pub const MAC_COMMAND: u16 = 0x37;
 
 /// Codes for Mac keys with no Windows counterpart: `PRIVATE + mac code`.
 const PRIVATE: u16 = 0x100;
+/// The keypad's Enter. Windows gives it Return's code (telling them apart by a flag), but here
+/// it needs its own: a shortcut on one must neither take the other nor be judged by its state.
+pub const VK_KEYPAD_ENTER: u16 = PRIVATE + 0x4C;
 
-/// (mac key code, Windows virtual-key code). Where several Mac keys share a Windows code (Return
-/// and the keypad's Enter), the first one is the one Talkr maps back to.
+/// (mac key code, Windows virtual-key code). Each Windows code belongs to one Mac key.
 const KEYS: &[(u16, u16)] = &[
     // Letters
     (0x00, 0x41), // A
@@ -79,8 +81,7 @@ const KEYS: &[(u16, u16)] = &[
     (0x27, 0xDE), // '
     (0x0A, 0xE2), // § (ISO keyboards)
     // Editing and navigation
-    (0x24, 0x0D), // Return
-    (0x4C, 0x0D), // keypad Enter
+    (0x24, 0x0D), // Return (the keypad's Enter is VK_KEYPAD_ENTER)
     (0x30, 0x09), // Tab
     (0x31, 0x20), // Space
     (0x33, 0x08), // Delete (backspace)
@@ -206,22 +207,34 @@ fn modifier_flags(vk: u16) -> Option<(u64, u64, u64)> {
     })
 }
 
-/// Whether the modifier `vk` is down according to an event's flags; `None` for other keys.
-/// The device bits tell left from right; events that carry none (some synthetic ones) only say
-/// whether either key is down.
-pub fn modifier_down(vk: u16, flags: u64) -> Option<bool> {
+/// What an event's flags say about the modifier `vk`: down, up, or `None` when they cannot tell
+/// (a key of its kind is down, but the event carries no device bits to say which: some
+/// synthetic events, some remote keyboards). The outer `None` is for keys that are no modifier.
+fn modifier_flags_say(vk: u16, flags: u64) -> Option<Option<bool>> {
     let (own, both, generic) = modifier_flags(vk)?;
-    if flags & generic == 0 {
-        return Some(false);
-    }
-    Some(if flags & both != 0 { flags & own != 0 } else { true })
+    Some(if flags & generic == 0 {
+        Some(false)
+    } else if flags & both != 0 {
+        Some(flags & own != 0)
+    } else {
+        None
+    })
+}
+
+/// Whether the modifier `vk` is down according to an event's flags; `None` for other keys.
+/// Without device bits the flags only say whether either key of its kind is down.
+pub fn modifier_down(vk: u16, flags: u64) -> Option<bool> {
+    modifier_flags_say(vk, flags).map(|said| said.unwrap_or(true))
 }
 
 /// A FlagsChanged event: which modifier changed (as a Windows code) and whether it is now down.
-/// `None` for keys the listener ignores: Caps Lock (a toggle, not held) and Fn.
-pub fn modifier_change(code: u16, flags: u64) -> Option<(u16, bool)> {
+/// `None` for keys the listener ignores: Caps Lock (a toggle, not held) and Fn. `was_down` is
+/// the listener's own view of the key: a FlagsChanged event means it changed, so where the
+/// flags cannot tell (no device bits, and the other key of its kind may hold the flag) it went
+/// the other way from where the listener last saw it.
+pub fn modifier_change(code: u16, flags: u64, was_down: bool) -> Option<(u16, bool)> {
     let vk = vk_from_mac(code);
-    modifier_down(vk, flags).map(|down| (vk, down))
+    modifier_flags_say(vk, flags).map(|said| (vk, said.unwrap_or(!was_down)))
 }
 
 /// The label a key typed, from the character the layout produced for it, when that is a
@@ -251,6 +264,7 @@ pub fn key_label(vk: u16) -> String {
         0x2E => "Forward Delete",
         0x09 => "Tab",
         0x0D => "Return",
+        VK_KEYPAD_ENTER => "Num Enter",
         0x1B => "Esc",
         0x2D => "Insert",
         0x24 => "Home",
@@ -369,13 +383,7 @@ mod tests {
     fn mapping_round_trips() {
         for code in 0u16..0x80 {
             let vk = vk_from_mac(code);
-            let back = mac_from_vk(vk).unwrap();
-            // Keypad Enter shares Return's Windows code and maps back to Return.
-            if code == 0x4C {
-                assert_eq!(back, MAC_RETURN);
-            } else {
-                assert_eq!(back, code, "{code:#x} -> {vk:#x}");
-            }
+            assert_eq!(mac_from_vk(vk), Some(code), "{code:#x} -> {vk:#x}");
         }
         assert_eq!(mac_from_vk(0x11), Some(0x3B), "Ctrl means left Control");
         assert_eq!(mac_from_vk(0x10), Some(0x38));
@@ -383,6 +391,17 @@ mod tests {
         assert_eq!(mac_from_vk(0x56), Some(MAC_V));
         assert_eq!(mac_from_vk(0x5B), Some(MAC_COMMAND));
         assert_eq!(mac_from_vk(0xFF), None);
+    }
+
+    /// Return and the keypad's Enter are two keys: a shortcut on one is not the other.
+    #[test]
+    fn keypad_enter_is_not_return() {
+        assert_eq!(vk_from_mac(MAC_RETURN), 0x0D);
+        assert_eq!(vk_from_mac(0x4C), VK_KEYPAD_ENTER);
+        assert_eq!(mac_from_vk(0x0D), Some(MAC_RETURN));
+        assert_eq!(mac_from_vk(VK_KEYPAD_ENTER), Some(0x4C));
+        assert_eq!(key_label(VK_KEYPAD_ENTER), "Num Enter");
+        assert_eq!(key_label(0x0D), "Return");
     }
 
     #[test]
@@ -429,21 +448,34 @@ mod tests {
     fn modifiers_from_flags() {
         // Left Command down (generic flag and its device bit).
         let flags = FLAG_COMMAND | DEVICE_LCOMMAND;
-        assert_eq!(modifier_change(0x37, flags), Some((VK_LWIN, true)));
+        assert_eq!(modifier_change(0x37, flags, false), Some((VK_LWIN, true)));
         assert_eq!(modifier_down(VK_RWIN, flags), Some(false));
-        // Both Shifts down, then the left one released: the device bits tell them apart.
+        // Both Shifts down, then the left one released: the device bits tell them apart, whatever
+        // the listener thought.
         let both = FLAG_SHIFT | DEVICE_LSHIFT | DEVICE_RSHIFT;
-        assert_eq!(modifier_change(0x38, both), Some((VK_LSHIFT, true)));
-        assert_eq!(modifier_change(0x38, FLAG_SHIFT | DEVICE_RSHIFT), Some((VK_LSHIFT, false)));
+        assert_eq!(modifier_change(0x38, both, true), Some((VK_LSHIFT, true)));
+        assert_eq!(modifier_change(0x38, FLAG_SHIFT | DEVICE_RSHIFT, false), Some((VK_LSHIFT, false)));
         // Released completely.
-        assert_eq!(modifier_change(0x3C, 0), Some((VK_RSHIFT, false)));
-        // Synthetic events without device bits: the generic flag decides.
-        assert_eq!(modifier_change(0x3B, FLAG_CONTROL), Some((VK_LCONTROL, true)));
-        assert_eq!(modifier_change(0x3E, FLAG_CONTROL | DEVICE_RCONTROL), Some((VK_RCONTROL, true)));
-        assert_eq!(modifier_change(0x3A, 0x100), Some((VK_LMENU, false)));
+        assert_eq!(modifier_change(0x3C, 0, true), Some((VK_RSHIFT, false)));
+        assert_eq!(modifier_change(0x3E, FLAG_CONTROL | DEVICE_RCONTROL, false), Some((VK_RCONTROL, true)));
+        assert_eq!(modifier_change(0x3A, 0x100, true), Some((VK_LMENU, false)));
         // Caps Lock and Fn are not modifiers here.
-        assert_eq!(modifier_change(0x39, 0x0001_0000), None);
-        assert_eq!(modifier_change(0x3F, 0x0080_0000), None);
+        assert_eq!(modifier_change(0x39, 0x0001_0000, false), None);
+        assert_eq!(modifier_change(0x3F, 0x0080_0000, false), None);
         assert_eq!(modifier_down(0x41, FLAGS_MODIFIERS), None);
+    }
+
+    /// Events without device bits: the generic flag stays set while either key of a kind is
+    /// down, so the listener's own view says which way the key went.
+    #[test]
+    fn modifiers_without_device_bits_follow_the_listener() {
+        // Left Control pressed: the flag appears.
+        assert_eq!(modifier_change(0x3B, FLAG_CONTROL, false), Some((VK_LCONTROL, true)));
+        // Right Control pressed too: the flag stays.
+        assert_eq!(modifier_change(0x3E, FLAG_CONTROL, false), Some((VK_RCONTROL, true)));
+        // Left Control let go while the right one holds the flag: a release, not a press.
+        assert_eq!(modifier_change(0x3B, FLAG_CONTROL, true), Some((VK_LCONTROL, false)));
+        // Without a history, the flags say only that some Control key is down.
+        assert_eq!(modifier_down(VK_LCONTROL, FLAG_CONTROL), Some(true));
     }
 }

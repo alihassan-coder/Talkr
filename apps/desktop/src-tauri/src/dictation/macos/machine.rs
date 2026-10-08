@@ -120,6 +120,17 @@ impl Machine {
         self.down.iter().fold(0, |m, &vk| m | modifier_bit(vk))
     }
 
+    /// Whether the listener saw `vk` go down and not yet up.
+    pub fn is_down(&self, vk: u16) -> bool {
+        self.down.contains(&vk)
+    }
+
+    /// A key shortcut for dictation is held, as the listener saw it. Its key is kept from the
+    /// apps, so the listener is the one that knows for certain.
+    pub fn dictate_held(&self) -> bool {
+        self.dictate_active
+    }
+
     /// One key event. `physically_down` says whether a key is held right now (to forget keys
     /// whose release the listener never saw); `label` names a key for a captured shortcut.
     pub fn handle(
@@ -294,24 +305,31 @@ impl Machine {
             if !is_modifier(vk) {
                 chord.key = Some(vk);
             }
+            // The page shows the keys as they go down: it cannot see them itself, they are kept
+            // from every app while recording.
+            step.events.push(HotkeyEvent::Capturing(chord_shortcut(*chord, label)));
             self.swallow(vk);
             return true;
         }
         if self.down.is_empty() {
             if let Some(chord) = self.capture.take() {
                 step.capture_ended = true;
-                step.events.push(HotkeyEvent::Captured(Shortcut {
-                    ctrl: chord.mods & CTRL != 0,
-                    shift: chord.mods & SHIFT != 0,
-                    alt: chord.mods & ALT != 0,
-                    win: chord.mods & WIN != 0,
-                    key: chord.key,
-                    key_label: chord.key.map(label),
-                }));
+                step.events.push(HotkeyEvent::Captured(chord_shortcut(chord, label)));
             }
         }
         // Releases of keys pressed before capture began belong to the app.
         false
+    }
+}
+
+fn chord_shortcut(chord: Chord, label: &dyn Fn(u16) -> String) -> Shortcut {
+    Shortcut {
+        ctrl: chord.mods & CTRL != 0,
+        shift: chord.mods & SHIFT != 0,
+        alt: chord.mods & ALT != 0,
+        win: chord.mods & WIN != 0,
+        key: chord.key,
+        key_label: chord.key.map(label),
     }
 }
 
@@ -354,6 +372,11 @@ mod tests {
 
         fn events(&mut self) -> Vec<HotkeyEvent> {
             std::mem::take(&mut self.events)
+        }
+
+        /// The events, without the live progress of a capture.
+        fn outcomes(&mut self) -> Vec<HotkeyEvent> {
+            self.events().into_iter().filter(|e| !matches!(e, E::Capturing(_))).collect()
         }
     }
 
@@ -533,9 +556,9 @@ mod tests {
         assert!(h.key(SPACE, true));
         h.key(SPACE, false);
         h.key(VK_LMENU, false);
-        assert!(h.events().is_empty(), "reported once everything is up");
+        assert!(h.outcomes().is_empty(), "reported once everything is up");
         h.key(LCTRL, false);
-        match h.events().as_slice() {
+        match h.outcomes().as_slice() {
             [E::Captured(s)] => {
                 assert!(s.ctrl && s.alt && !s.shift && !s.win);
                 assert_eq!(s.key, Some(SPACE));
@@ -559,7 +582,7 @@ mod tests {
         h.key(LCMD, true);
         h.key(LCMD, false);
         h.key(VK_LMENU, false);
-        match h.events().as_slice() {
+        match h.outcomes().as_slice() {
             [E::Captured(s)] => {
                 assert!(s.alt && s.win && !s.ctrl && !s.shift);
                 assert_eq!(s.key, None);
@@ -575,7 +598,51 @@ mod tests {
         h.config.capturing = true;
         h.key(LCTRL, true);
         h.key(LCMD, true);
-        assert!(h.events().is_empty());
+        assert!(h.outcomes().is_empty());
+    }
+
+    /// While recording a shortcut, each new key is reported as it goes down (repeats and
+    /// releases are not), so the settings page can show the keys live.
+    #[test]
+    fn capture_shows_keys_as_they_go_down() {
+        let mut h = Harness::new(Some(Shortcut::ctrl_win()), None);
+        h.config.capturing = true;
+        h.key(LCTRL, true);
+        h.key(VK_LMENU, true);
+        h.key(VK_LMENU, true);
+        h.key(SPACE, true);
+        h.key(SPACE, true);
+        h.key(SPACE, false);
+        let events = h.events();
+        let live: Vec<&Shortcut> = events
+            .iter()
+            .filter_map(|e| match e {
+                E::Capturing(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(live.len(), 3, "{events:?}");
+        assert!(live[0].ctrl && !live[0].alt && live[0].key.is_none());
+        assert!(live[1].ctrl && live[1].alt && live[1].key.is_none());
+        assert!(live[2].ctrl && live[2].alt && live[2].key == Some(SPACE));
+        assert_eq!(live[2].key_label.as_deref(), Some("Space"));
+        assert_eq!(events.len(), 3, "nothing else until every key is up");
+    }
+
+    #[test]
+    fn the_listener_knows_a_key_chord_is_held() {
+        let mut h = Harness::new(Some(ctrl_space()), None);
+        h.key(LCTRL, true);
+        assert!(!h.machine.dictate_held());
+        h.key(SPACE, true);
+        assert!(h.machine.dictate_held() && h.machine.is_down(SPACE));
+        h.key(SPACE, true);
+        assert!(h.machine.dictate_held(), "auto-repeat");
+        h.key(SPACE, false);
+        assert!(!h.machine.dictate_held() && !h.machine.is_down(SPACE));
+        h.key(SPACE, true);
+        h.key(LCTRL, false);
+        assert!(!h.machine.dictate_held(), "its modifier let go first");
     }
 
     #[test]
@@ -586,7 +653,7 @@ mod tests {
         h.config.capturing = false;
         assert!(h.key(0x41, false), "its press was kept from the app, so its release is too");
         assert!(h.machine.is_idle());
-        assert!(h.events().is_empty());
+        assert!(h.outcomes().is_empty());
         h.key(LCTRL, true);
         assert!(h.key(SPACE, true));
         assert_eq!(h.events(), vec![E::DictateDown]);

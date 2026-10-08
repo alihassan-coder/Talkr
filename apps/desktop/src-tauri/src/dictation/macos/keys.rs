@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 use super::ffi::{self, Cf};
 use super::keymap::{self, FLAGS_MODIFIERS, FLAG_COMMAND, FLAG_CONTROL, FLAG_OPTION, FLAG_SHIFT, MAC_COMMAND, MAC_RETURN, MAC_V};
+use super::layout::Stroke;
 use super::target::LineBreak;
 use crate::dictation::settings::Shortcut;
 
@@ -49,28 +50,88 @@ pub fn paste() -> bool {
     command && pressed && released && command_up
 }
 
+const MAC_SHIFT: u16 = 0x38;
+
+/// How much of a text was typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Typed {
+    All,
+    Nothing,
+    /// Some keys went in, then macOS refused one: the field holds part of the text.
+    Partly,
+}
+
+impl Typed {
+    fn stopped(after_any: bool) -> Typed {
+        if after_any {
+            Typed::Partly
+        } else {
+            Typed::Nothing
+        }
+    }
+}
+
+/// Press and release one key; whether both events were posted.
+fn tap_key(source: &Cf, code: u16, flags: u64, text: Option<&[u16]>) -> bool {
+    post(source, code, true, flags, text) && post(source, code, false, flags, text)
+}
+
 /// Type `text` as key events carrying its characters, a few at a time so slow apps keep up.
-pub fn type_text(text: &str, line_break: LineBreak) -> bool {
-    let Some(source) = source() else { return false };
+pub fn type_text(text: &str, line_break: LineBreak) -> Typed {
+    let Some(source) = source() else { return Typed::Nothing };
     let pause = || std::thread::sleep(Duration::from_millis(4));
+    let mut any = false;
     for (i, line) in text.split('\n').enumerate() {
         if i > 0 {
             let flags = if line_break == LineBreak::ShiftReturn { FLAG_SHIFT } else { 0 };
-            if !(post(&source, MAC_RETURN, true, flags, None) && post(&source, MAC_RETURN, false, flags, None)) {
-                return false;
+            if !tap_key(&source, MAC_RETURN, flags, None) {
+                return Typed::stopped(any);
             }
+            any = true;
             pause();
         }
         let units: Vec<u16> = line.trim_end_matches('\r').encode_utf16().collect();
         for chunk in keymap::typing_chunks(&units, 16) {
             // Key code 0 with the text attached: apps take the text, not the key.
-            if !(post(&source, 0, true, 0, Some(chunk)) && post(&source, 0, false, 0, Some(chunk))) {
-                return false;
+            if !tap_key(&source, 0, 0, Some(chunk)) {
+                return Typed::stopped(any);
             }
+            any = true;
             pause();
         }
     }
-    true
+    Typed::All
+}
+
+/// Type real keys, one per character (see `layout`), for apps that pass key codes on to another
+/// system. Shift is pressed as a key of its own around the keys that need it: the other side
+/// tracks Shift's key, not the flags on each event. Slower than `type_text`, as remote links
+/// drop keys that come too fast.
+pub fn type_keys(strokes: &[Stroke]) -> Typed {
+    let Some(source) = source() else { return Typed::Nothing };
+    let mut shift = false;
+    let mut any = false;
+    let mut result = Typed::All;
+    for stroke in strokes {
+        if stroke.shift != shift {
+            let flags = if stroke.shift { FLAG_SHIFT } else { 0 };
+            if !post(&source, MAC_SHIFT, stroke.shift, flags, None) {
+                result = Typed::stopped(any);
+                break;
+            }
+            shift = stroke.shift;
+        }
+        if !tap_key(&source, stroke.code, if shift { FLAG_SHIFT } else { 0 }, None) {
+            result = Typed::stopped(any);
+            break;
+        }
+        any = true;
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    if shift {
+        post(&source, MAC_SHIFT, false, 0, None);
+    }
+    result
 }
 
 /// The modifier flags held right now, by anyone (the keyboard, or software posting keys).
@@ -85,15 +146,21 @@ pub fn key_held(code: u16) -> bool {
     unsafe { ffi::CGEventSourceKeyState(ffi::STATE_COMBINED_SESSION, code) }
 }
 
-/// Whether every key of `shortcut` is held right now.
-pub fn shortcut_held(shortcut: &Shortcut) -> bool {
+/// Whether every key of `shortcut` is held right now. `listener`: whether the listener saw its
+/// key go down and not up, when the listener runs. It keeps that key from apps, and a key kept
+/// from the session may not show in the session's key state, so its word goes first; the
+/// modifiers, which always reach apps, are read from the system.
+pub fn shortcut_held(shortcut: &Shortcut, listener: Option<bool>) -> bool {
     let flags = held_flags();
     let held = |on: bool, flag: u64| !on || flags & flag != 0;
     held(shortcut.ctrl, FLAG_CONTROL)
         && held(shortcut.shift, FLAG_SHIFT)
         && held(shortcut.alt, FLAG_OPTION)
         && held(shortcut.win, FLAG_COMMAND)
-        && shortcut.key.is_none_or(|vk| keymap::mac_from_vk(vk).is_none_or(key_held))
+        && shortcut.key.is_none_or(|vk| match listener {
+            Some(held) => held,
+            None => keymap::mac_from_vk(vk).is_none_or(key_held),
+        })
 }
 
 /// Wait until the user has let go of ⌃, ⇧, ⌥ and ⌘, so a paste is not read as ⌃⌘V. Returns
@@ -122,9 +189,19 @@ mod tests {
             return;
         }
         let _turn = super::super::pasteboard::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        assert!(!shortcut_held(&Shortcut::ctrl_win()));
-        assert!(!shortcut_held(&Shortcut::alt_shift_v()));
+        assert!(!shortcut_held(&Shortcut::ctrl_win(), None));
+        assert!(!shortcut_held(&Shortcut::alt_shift_v(), None));
+        assert!(!shortcut_held(&Shortcut::alt_shift_v(), Some(true)), "its modifiers are up");
         assert!(wait_for_modifiers_released(Duration::from_millis(100)));
         assert!(!key_held(MAC_V));
+    }
+
+    /// A key shortcut's key is judged by the listener while it runs: the key it keeps from the
+    /// apps may not show in the system's key state. Without modifiers, only the key counts.
+    #[test]
+    fn the_listener_answers_for_the_key_it_keeps() {
+        let f19 = Shortcut { ctrl: false, shift: false, alt: false, win: false, key: Some(0x82), key_label: None };
+        assert!(shortcut_held(&f19, Some(true)));
+        assert!(!shortcut_held(&f19, Some(false)));
     }
 }

@@ -8,6 +8,7 @@ mod field;
 mod insert;
 mod keymap;
 mod keys;
+mod layout;
 mod machine;
 mod pasteboard;
 mod pill;
@@ -16,7 +17,8 @@ mod tap;
 mod target;
 mod workspace;
 
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::dictation::backend::{Backend, Capabilities, Delivery, Permission};
 use crate::dictation::settings::{DictationSettings, OverlayPosition, Shortcut};
 use crate::dictation::{text, HotkeyEvent};
@@ -64,13 +66,18 @@ impl Backend for Os {
     }
 
     fn request_permission() {
+        static THIS_SESSION: AtomicBool = AtomicBool::new(false);
+        let asked_before = note_prompt(&THIS_SESSION, prompt_marker().as_deref());
         if ffi::prompt_for_trust() {
             return;
         }
         // macOS shows its prompt only the first time an app ever asks (and remembers that across
-        // launches); the settings pane always opens.
-        if let Err(e) = std::process::Command::new("/usr/bin/open").arg(SETTINGS_URL).spawn() {
-            log::warn!("could not open the Accessibility settings: {}", e);
+        // launches): from then on only System Settings can allow Talkr, so open it. Not on the
+        // first request, which the prompt answers (it has its own button to open the pane).
+        if asked_before {
+            if let Err(e) = std::process::Command::new("/usr/bin/open").arg(SETTINGS_URL).spawn() {
+                log::warn!("could not open the Accessibility settings: {}", e);
+            }
         }
     }
 
@@ -99,13 +106,13 @@ impl Backend for Os {
     }
 
     fn shortcut_held(shortcut: &Shortcut) -> Option<bool> {
-        Some(keys::shortcut_held(shortcut))
+        // A key shortcut's key is kept from apps by the listener: ask the listener about it.
+        let listener = tap::is_running().then(tap::dictate_held);
+        Some(keys::shortcut_held(shortcut, listener))
     }
 
     fn snapshot() -> Option<Self::Target> {
-        let target = workspace::snapshot()?;
-        expose_once(target.pid);
-        Some(target)
+        workspace::snapshot()
     }
 
     fn app_label(t: &Self::Target) -> Option<String> {
@@ -120,12 +127,17 @@ impl Backend for Os {
         clean: &str,
         target: Option<&Self::Target>,
         settings: &DictationSettings,
-        _owner: Option<&tauri::WebviewWindow>,
+        owner: Option<&tauri::WebviewWindow>,
     ) -> Delivery {
-        let copy = |reason: target::CopyReason| Delivery::copied(reason.message(), pasteboard::put_text(clean, false).is_some());
-        let Some(t) = target else { return copy(target::CopyReason::NoTextField) };
+        // Text meant for a password box is copied marked concealed and transient, so clipboard
+        // managers leave it out of their history.
+        let copy = |reason: target::CopyReason, password: bool| Delivery {
+            password,
+            ..Delivery::copied(reason.message(), pasteboard::put_text(clean, password).is_some())
+        };
+        let Some(t) = target else { return copy(target::CopyReason::NoTextField, false) };
         let ready = match insert::prepare(t, settings) {
-            Prepared::Copy(reason) => return copy(reason),
+            Prepared::Copy(reason) => return copy(reason, false),
             Prepared::Ready(ready) => ready,
         };
         let password = ready.field.as_ref().is_some_and(|f| f.password);
@@ -134,7 +146,7 @@ impl Backend for Os {
             Some(before) if settings.smart_spacing => text::fit_to_context(clean, before),
             _ => clean.to_string(),
         };
-        match insert::deliver(&ready, &fitted, settings) {
+        match insert::deliver(&ready, &fitted, settings, owner) {
             Outcome::Inserted { method, verdict, learned_typing } => Delivery {
                 inserted: true,
                 verified: verdict == field::Verdict::Arrived,
@@ -143,7 +155,7 @@ impl Backend for Os {
                 learned_typing_for: if learned_typing { ready.target.app_id() } else { None },
                 ..Delivery::default()
             },
-            Outcome::Copied(reason) => Delivery { password, ..copy(reason) },
+            Outcome::Copied(reason) => copy(reason, password),
         }
     }
 
@@ -166,30 +178,56 @@ impl Backend for Os {
     }
 }
 
-/// Ask the app to expose its fields (see `ax::expose`) the first time it is dictated into, on a
-/// thread of its own: the shortcut was just pressed and must not wait on another app. The text
-/// goes in seconds later, by when the app has built its tree.
-fn expose_once(pid: i32) {
-    static DONE: Mutex<Vec<i32>> = Mutex::new(Vec::new());
-    if !ffi::trusted() {
-        return;
-    }
-    {
-        let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
-        if done.contains(&pid) {
-            return;
+/// Where Talkr notes that it has asked macOS for Accessibility before: next to its other cached
+/// state, in the data folder (`TALKR_HOME`, else the home folder).
+fn prompt_marker() -> Option<PathBuf> {
+    let base = match std::env::var_os("TALKR_HOME").filter(|v| !v.is_empty()) {
+        Some(v) => {
+            let path = PathBuf::from(v);
+            if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir().ok()?.join(path)
+            }
         }
-        if done.len() >= 256 {
-            done.clear();
+        None => dirs::home_dir()?,
+    };
+    Some(base.join(".talkr").join("cache").join("accessibility-prompted"))
+}
+
+/// Note a request for the Accessibility prompt; returns whether one was made before, in this
+/// session (`session`) or an earlier one (`marker` exists).
+fn note_prompt(session: &AtomicBool, marker: Option<&Path>) -> bool {
+    let mut before = session.swap(true, Ordering::SeqCst);
+    if let Some(marker) = marker {
+        before |= marker.exists();
+        let written = marker.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(marker, b""));
+        if let Err(e) = written {
+            log::debug!("could not note the Accessibility prompt: {}", e);
         }
-        done.push(pid);
     }
-    let _ = std::thread::Builder::new().name("talkr-ax".into()).spawn(move || ax::expose(pid));
+    before
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first request shows macOS's prompt only; a later one, in this session or after a
+    /// restart, also opens System Settings, where macOS sends the user from then on.
+    #[test]
+    fn settings_open_only_once_the_prompt_was_shown() {
+        let dir = std::env::temp_dir().join(format!("talkr-prompt-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let marker = dir.join("cache").join("accessibility-prompted");
+        let session = AtomicBool::new(false);
+        assert!(!note_prompt(&session, Some(&marker)), "first request: the prompt only");
+        assert!(marker.exists());
+        assert!(note_prompt(&session, Some(&marker)), "asked again in this session");
+        assert!(note_prompt(&AtomicBool::new(false), Some(&marker)), "asked again after a restart");
+        assert!(!note_prompt(&AtomicBool::new(false), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn capabilities_and_permission_agree() {

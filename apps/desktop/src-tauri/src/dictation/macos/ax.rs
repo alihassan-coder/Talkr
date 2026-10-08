@@ -3,7 +3,7 @@
 //! short messaging timeout: a hung app costs at most a moment, never a frozen dictation.
 
 use std::ffi::c_void;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use super::ffi::{self, Cf, CFRange, CGPoint, CGSize, AX_SUCCESS};
 use super::field::{self, FieldInfo, CONTEXT_CHARS, MAX_VALUE_CHARS};
 
@@ -148,22 +148,48 @@ pub fn focused_window_center(pid: i32) -> Option<(f64, f64)> {
     Some((origin.x + size.width / 2.0, origin.y + size.height / 2.0))
 }
 
-/// Ask app `pid` to build its accessibility tree. Electron and Chromium apps (Slack, VS Code,
-/// Discord, Chrome) build it only when an assistive app asks, through `AXManualAccessibility`;
-/// without it their fields cannot be read, so smart spacing and verification would be off there.
-/// Other apps answer that the attribute is unsupported, which changes nothing.
-pub fn expose(pid: i32) {
+/// Ask app `pid` to build its accessibility tree; returns whether it took the request. Electron
+/// and Chromium apps (Slack, VS Code, Discord, Chrome) build it only when an assistive app asks,
+/// through `AXManualAccessibility`; without it their fields cannot be read, so smart spacing and
+/// verification would be off there. Other apps answer that the attribute is unsupported, which
+/// changes nothing.
+pub fn expose(pid: i32) -> bool {
     if !ffi::trusted() || pid <= 0 {
-        return;
+        return false;
     }
     // SAFETY: Create returns an owned element.
-    let Some(app) = (unsafe { Cf::from_owned(ffi::AXUIElementCreateApplication(pid)) }) else { return };
-    let Some(name) = ffi::cf_string("AXManualAccessibility") else { return };
+    let Some(app) = (unsafe { Cf::from_owned(ffi::AXUIElementCreateApplication(pid)) }) else { return false };
+    let Some(name) = ffi::cf_string("AXManualAccessibility") else { return false };
     // SAFETY: valid element and name; kCFBooleanTrue is a constant.
     unsafe {
         ffi::AXUIElementSetMessagingTimeout(app.as_ptr(), 0.3);
-        ffi::AXUIElementSetAttributeValue(app.as_ptr(), name.as_ptr(), ffi::kCFBooleanTrue);
+        ffi::AXUIElementSetAttributeValue(app.as_ptr(), name.as_ptr(), ffi::kCFBooleanTrue) == AX_SUCCESS
     }
+}
+
+/// [`expose`] app `pid`, the first time its focused field could not be read; returns whether it
+/// was asked just now and took the request.
+///
+/// Only then: an app keeps its tree for as long as it runs once asked, and in Chromium that
+/// costs memory and CPU on every change to the page. Apps whose fields read fine are never
+/// asked. Talkr does not switch it off again after a dictation either, since the next one would
+/// pay for a rebuild (a long page takes seconds) and find the field unreadable again.
+pub fn expose_once(pid: i32) -> bool {
+    static DONE: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    if !ffi::trusted() || pid <= 0 {
+        return false;
+    }
+    {
+        let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+        if done.contains(&pid) {
+            return false;
+        }
+        if done.len() >= 256 {
+            done.clear();
+        }
+        done.push(pid);
+    }
+    expose(pid)
 }
 
 /// Bring app `pid` to the front through Accessibility, which works where activating it as an app
@@ -209,9 +235,10 @@ mod tests {
         }
         if let Some(target) = super::super::workspace::snapshot() {
             let _ = focused_window_center(target.pid);
-            expose(target.pid);
+            let _ = expose(target.pid);
         }
         assert_eq!(focused_window_center(0), None);
+        assert!(!expose(0) && !expose_once(-1), "no such app");
         assert!(!raise(i32::MAX), "no such app");
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }

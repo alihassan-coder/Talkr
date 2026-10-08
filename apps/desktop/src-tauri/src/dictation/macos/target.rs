@@ -103,9 +103,13 @@ impl Target {
         self.is(SHELL_APPS)
     }
 
-    /// Typing that suits this app: line breaks as Shift + Return in chat apps.
+    /// Typing that suits this app: line breaks as Shift + Return in chat apps, real keys for
+    /// remote desktops and virtual machines.
     pub fn typing(&self) -> Method {
-        Method::Type { line_break: if self.is(CHAT_APPS) { LineBreak::ShiftReturn } else { LineBreak::Return } }
+        Method::Type {
+            line_break: if self.is(CHAT_APPS) { LineBreak::ShiftReturn } else { LineBreak::Return },
+            keys: self.is(TYPE_APPS),
+        }
     }
 }
 
@@ -120,8 +124,9 @@ pub enum LineBreak {
 pub enum Method {
     /// Through the clipboard and ⌘V.
     Paste,
-    /// As keystrokes carrying the text.
-    Type { line_break: LineBreak },
+    /// As keystrokes carrying the text or, with `keys`, as the keys that type each character on
+    /// the current layout (for apps that pass key codes on and drop the text: see `layout`).
+    Type { line_break: LineBreak, keys: bool },
 }
 
 impl Method {
@@ -142,6 +147,10 @@ pub enum CopyReason {
     NoPermission,
     AppOff,
     NotDelivered,
+    /// Typing real keys, and a character has no key on this layout.
+    NotTypable,
+    /// Typing stopped part-way: the field may hold the start of the text.
+    TypingIncomplete,
 }
 
 impl CopyReason {
@@ -153,6 +162,8 @@ impl CopyReason {
             CopyReason::NoPermission => "Allow Talkr in Privacy & Security › Accessibility to insert text",
             CopyReason::AppOff => "Dictation is off for this app",
             CopyReason::NotDelivered => "The app did not accept the text",
+            CopyReason::NotTypable => "Some characters cannot be typed as keys into this app",
+            CopyReason::TypingIncomplete => "Typing stopped part-way",
         }
     }
 }
@@ -205,8 +216,8 @@ mod tests {
         assert_eq!(choose(&app("com.google.Chrome"), &s), Ok((Method::Paste, false)));
         assert_eq!(
             choose(&app("com.microsoft.rdc.macos"), &s),
-            Ok((Method::Type { line_break: LineBreak::Return }, false)),
-            "remote desktops get keystrokes"
+            Ok((Method::Type { line_break: LineBreak::Return, keys: true }, false)),
+            "remote desktops get real keys"
         );
         assert!(app("com.apple.finder").is_shell());
         assert!(app("com.microsoft.Word").is_slow_paste());
@@ -217,7 +228,12 @@ mod tests {
         let s = DictationSettings { insert_method: InsertMethod::Type, ..Default::default() };
         assert_eq!(
             choose(&app("com.tinyspeck.slackmacgap"), &s),
-            Ok((Method::Type { line_break: LineBreak::ShiftReturn }, true))
+            Ok((Method::Type { line_break: LineBreak::ShiftReturn, keys: false }, true))
+        );
+        assert_eq!(
+            choose(&app("com.vmware.fusion"), &s),
+            Ok((Method::Type { line_break: LineBreak::Return, keys: true }, true)),
+            "typing into a virtual machine is always by key"
         );
         let s = DictationSettings {
             app_rules: vec![
@@ -230,7 +246,7 @@ mod tests {
         assert_eq!(choose(&app("com.tinyspeck.slackmacgap"), &s), Err(CopyReason::AppOff));
         assert_eq!(
             choose(&app("com.apple.TextEdit"), &s),
-            Ok((Method::Type { line_break: LineBreak::Return }, true)),
+            Ok((Method::Type { line_break: LineBreak::Return, keys: false }, true)),
             "rules match the id whatever its case"
         );
         assert_eq!(choose(&app("com.microsoft.rdc.macos"), &s), Ok((Method::Paste, true)));
@@ -245,6 +261,8 @@ mod tests {
             CopyReason::NoPermission,
             CopyReason::AppOff,
             CopyReason::NotDelivered,
+            CopyReason::NotTypable,
+            CopyReason::TypingIncomplete,
         ] {
             let m = reason.message();
             assert!(!m.is_empty() && !m.ends_with('.') && m.len() < 80, "{m}");

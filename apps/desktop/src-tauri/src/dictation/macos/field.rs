@@ -78,6 +78,13 @@ pub fn editable(role: &str, value_settable: Option<bool>, has_selection: bool) -
     None
 }
 
+/// Nothing useful could be read about the focused element: no element at all, or one that says
+/// neither whether it takes text nor what is in it. That is how Electron and Chromium apps look
+/// before they build their accessibility tree (see `ax::expose_once`).
+pub fn unreadable(field: Option<&FieldInfo>) -> bool {
+    field.is_none_or(|f| f.editable.is_none() && f.before_caret.is_none() && f.value.is_none())
+}
+
 /// Whether the field is a password box: its text must not be read or kept in history.
 pub fn is_password(role: &str, subrole: &str) -> bool {
     subrole == "AXSecureTextField" || role == "AXSecureTextField"
@@ -160,6 +167,16 @@ mod tests {
             editable: Some(true),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn only_fields_that_say_nothing_are_unreadable() {
+        assert!(unreadable(None));
+        assert!(unreadable(Some(&FieldInfo { role: "AXGroup".into(), ..Default::default() })));
+        assert!(!unreadable(Some(&field(Some("Hi"), None))));
+        assert!(!unreadable(Some(&FieldInfo { role: "AXButton".into(), editable: Some(false), ..Default::default() })));
+        let password = FieldInfo { password: true, editable: Some(true), ..Default::default() };
+        assert!(!unreadable(Some(&password)), "a password box is read enough: it is never read further");
     }
 
     fn utf16(s: &str) -> Vec<u16> {
