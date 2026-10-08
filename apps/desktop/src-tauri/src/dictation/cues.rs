@@ -48,7 +48,8 @@ pub fn samples(cue: Cue) -> &'static [f32] {
     })
 }
 
-/// A 16-bit mono WAV image of the cue.
+/// A 16-bit mono WAV image of the cue (for players that take a file, like PlaySound).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn wav(cue: Cue) -> &'static [u8] {
     static START: OnceLock<Vec<u8>> = OnceLock::new();
     static STOP: OnceLock<Vec<u8>> = OnceLock::new();
@@ -61,6 +62,7 @@ pub fn wav(cue: Cue) -> &'static [u8] {
     slot.get_or_init(|| encode_wav(samples(cue)))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn encode_wav(samples: &[f32]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);

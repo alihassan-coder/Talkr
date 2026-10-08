@@ -71,6 +71,8 @@ const TICK: Duration = Duration::from_millis(33);
 
 /// What the keyboard hook reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// A backend that is not implemented yet constructs none of these.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum HotkeyEvent {
     DictateDown,
     DictateUp,

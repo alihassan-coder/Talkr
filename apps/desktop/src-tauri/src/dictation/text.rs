@@ -353,6 +353,7 @@ pub fn preview(text: &str, max_chars: usize) -> String {
 }
 
 /// For terminals: a line break would run the command, so lines are joined with spaces.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn single_line(text: &str) -> String {
     text.split(['\n', '\r']).map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ")
 }
