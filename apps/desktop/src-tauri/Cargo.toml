@@ -90,6 +90,30 @@ windows = { version = "0.62", features = [
 # ---- System-wide dictation on macOS (src/dictation/macos): event taps, Accessibility, the
 # pasteboard, the frontmost app. ----
 [target.'cfg(target_os = "macos")'.dependencies]
+# AppKit for the frontmost app, the pasteboard and the pill's window; Core Graphics, the
+# Accessibility API and Core Foundation are declared by hand (dictation/macos/ffi.rs). Already in
+# the tree via tao and wry.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSArray",
+  "NSData",
+  "NSGeometry",
+  "NSString",
+  "objc2-core-foundation",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "libc",
+  "NSEvent",
+  "NSPasteboard",
+  "NSPasteboardItem",
+  "NSResponder",
+  "NSRunningApplication",
+  "NSScreen",
+  "NSWindow",
+  "NSWorkspace",
+] }
 
 
 # ---- System-wide dictation on Linux (src/dictation/linux). Each backend lists its own crates
