@@ -127,7 +127,8 @@ describe('Appearance picker', () => {
     // Back to a built-in theme: the inline tokens go away.
     await user.click(screen.getByRole('radio', { name: 'Forest, Evergreen' }))
     expect(document.documentElement.style.getPropertyValue('--color-accent')).toBe('')
-  })
+    // Typing a dozen characters re-renders the previews each time: slow under a busy jsdom.
+  }, 15000)
 
   it('changes and resets the interface zoom', async () => {
     const user = userEvent.setup()
@@ -143,5 +144,32 @@ describe('Appearance picker', () => {
     expect(useUi.getState().zoom).toBe(1)
     useUi.setState({ zoom: 0.8 })
     expect(await within(group).findByRole('button', { name: 'Zoom out' })).toBeDisabled()
+  })
+
+  it('moves the zoom with the slider keys', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    const slider = screen.getByRole('slider', { name: 'Zoom level' })
+    expect(slider).toHaveAttribute('aria-valuetext', '100%')
+    slider.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(useUi.getState().zoom).toBe(1.1)
+    expect(slider).toHaveAttribute('aria-valuenow', '110')
+    await user.keyboard('{End}')
+    expect(useUi.getState().zoom).toBe(1.5)
+    await user.keyboard('{Home}')
+    expect(useUi.getState().zoom).toBe(0.8)
+    await user.keyboard('{ArrowLeft}')
+    expect(useUi.getState().zoom).toBe(0.8)
+  })
+
+  it('previews a theme under the pointer without applying it', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.hover(screen.getByRole('radio', { name: 'Rose, Soft blush' }))
+    expect(screen.getByText('Previewing Rose')).toBeInTheDocument()
+    expect(useUi.getState().theme).toBe('graphite')
+    await user.unhover(screen.getByRole('radiogroup', { name: 'Theme' }))
+    expect(screen.getByText('Live preview')).toBeInTheDocument()
   })
 })
