@@ -264,24 +264,44 @@ app.run;
             return;
         }
         let _turn = pasteboard::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Straight to stderr, past the harness's capture, to show in the CI log.
+        let note = |text: String| {
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr(), "real text field test: {text}");
+        };
+        let front = Os::snapshot();
+        note(format!("frontmost before: {front:?}"));
+        if front.is_some_and(|t| t.bundle_id == "com.apple.AccessibilityUIServer") {
+            // A permission dialog left over from the runner's start keeps the focus: dismiss it.
+            let _ = std::process::Command::new("/usr/bin/killall").arg("AccessibilityUIServer").status();
+            std::thread::sleep(Duration::from_secs(1));
+            note(format!("after closing the Accessibility dialog: {:?}", Os::snapshot()));
+        }
         let script = std::env::temp_dir().join("talkr-test-field.js");
         std::fs::write(&script, TEST_FIELD_APP).unwrap();
         let child = std::process::Command::new("/usr/bin/osascript").args(["-l", "JavaScript"]).arg(&script).spawn().unwrap();
         let field = TestField(child);
         let pid = field.0.id() as i32;
 
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let started = Instant::now();
+        let mut last_note = started;
         let target = loop {
             let front = Os::snapshot();
             let focused = ax::inspect();
             if let Some(front) = front.clone().filter(|t| t.pid == pid) {
                 if focused.as_ref().is_some_and(|f| f.pid == pid && f.role == "AXTextArea") {
+                    note(format!("the field has focus after {:?}", started.elapsed()));
                     break front;
                 }
             } else {
                 workspace::activate(&Target { pid, ..Target::default() });
             }
-            assert!(Instant::now() < deadline, "the test field never got focus: front {front:?}, focused {focused:?}");
+            if last_note.elapsed() >= Duration::from_secs(5) {
+                last_note = Instant::now();
+                let running = workspace::is_running(&Target { pid, ..Target::default() });
+                note(format!("waiting: front {front:?}, focused {focused:?}, field app running: {running}"));
+            }
+            assert!(started.elapsed() < Duration::from_secs(30), "the test field never got focus: front {front:?}, focused {focused:?}");
             std::thread::sleep(Duration::from_millis(250));
         };
         let value = || ax::inspect().and_then(|f| f.value).unwrap_or_default();
