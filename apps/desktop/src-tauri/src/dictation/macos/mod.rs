@@ -16,6 +16,7 @@ mod tap;
 mod target;
 mod workspace;
 
+use std::sync::Mutex;
 use crate::dictation::backend::{Backend, Capabilities, Delivery, Permission};
 use crate::dictation::settings::{DictationSettings, OverlayPosition, Shortcut};
 use crate::dictation::{text, HotkeyEvent};
@@ -66,7 +67,8 @@ impl Backend for Os {
         if ffi::prompt_for_trust() {
             return;
         }
-        // The prompt shows once per app; the settings pane always works.
+        // macOS shows its prompt only the first time an app ever asks (and remembers that across
+        // launches); the settings pane always opens.
         if let Err(e) = std::process::Command::new("/usr/bin/open").arg(SETTINGS_URL).spawn() {
             log::warn!("could not open the Accessibility settings: {}", e);
         }
@@ -101,7 +103,9 @@ impl Backend for Os {
     }
 
     fn snapshot() -> Option<Self::Target> {
-        workspace::snapshot()
+        let target = workspace::snapshot()?;
+        expose_once(target.pid);
+        Some(target)
     }
 
     fn app_label(t: &Self::Target) -> Option<String> {
@@ -160,6 +164,27 @@ impl Backend for Os {
         let handle = window.clone();
         let _ = window.run_on_main_thread(move || pill::hide(&handle));
     }
+}
+
+/// Ask the app to expose its fields (see `ax::expose`) the first time it is dictated into, on a
+/// thread of its own: the shortcut was just pressed and must not wait on another app. The text
+/// goes in seconds later, by when the app has built its tree.
+fn expose_once(pid: i32) {
+    static DONE: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    if !ffi::trusted() {
+        return;
+    }
+    {
+        let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+        if done.contains(&pid) {
+            return;
+        }
+        if done.len() >= 256 {
+            done.clear();
+        }
+        done.push(pid);
+    }
+    let _ = std::thread::Builder::new().name("talkr-ax".into()).spawn(move || ax::expose(pid));
 }
 
 #[cfg(test)]

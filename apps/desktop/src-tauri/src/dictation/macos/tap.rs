@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use super::ffi::{self, CGEventRef};
-use super::keymap::{self, FLAG_OPTION};
+use super::keymap;
 use super::keys::{self, MARKER};
 use super::machine::{modifier_bit, Chord, Config, Machine};
 use crate::dictation::settings::Shortcut;
@@ -111,7 +111,7 @@ fn on_event(kind: u32, event: CGEventRef) -> bool {
     };
     let config = config();
     if config.capturing && down && modifier_bit(vk) == 0 {
-        let label = keymap::label_from_typed(&typed(event), flags & FLAG_OPTION != 0);
+        let label = keymap::label_from_typed(&typed(event), flags);
         CAPTURE_LABEL.with(|l| *l.borrow_mut() = label.map(|label| (vk, label)));
     }
     // Modifiers are read from this event's own flags (always current); other keys from the

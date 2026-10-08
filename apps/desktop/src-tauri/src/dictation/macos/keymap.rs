@@ -226,14 +226,18 @@ pub fn modifier_change(code: u16, flags: u64) -> Option<(u16, bool)> {
 
 /// The label a key typed, from the character the layout produced for it, when that is a
 /// plain visible character ("Z" on a German keyboard where the US one has "Y"). `None` when
-/// Option was held (it types special characters) or the key typed nothing printable.
-pub fn label_from_typed(typed: &str, option_held: bool) -> Option<String> {
-    if option_held {
+/// Option was held (it types special characters), when Shift turned the key into another symbol
+/// (⇧1 types "!", but the key is "1"), or when the key typed nothing printable.
+pub fn label_from_typed(typed: &str, flags: u64) -> Option<String> {
+    if flags & FLAG_OPTION != 0 {
         return None;
     }
     let mut chars = typed.chars();
     let c = chars.next()?;
     if chars.next().is_some() || c.is_control() || c.is_whitespace() || ('\u{E000}'..='\u{F8FF}').contains(&c) {
+        return None;
+    }
+    if flags & FLAG_SHIFT != 0 && !c.is_alphabetic() {
         return None;
     }
     Some(c.to_uppercase().collect())
@@ -408,14 +412,17 @@ mod tests {
 
     #[test]
     fn labels_follow_the_layout_when_they_can() {
-        assert_eq!(label_from_typed("z", false).as_deref(), Some("Z"));
-        assert_eq!(label_from_typed("ö", false).as_deref(), Some("Ö"));
-        assert_eq!(label_from_typed("é", true), None, "Option types special characters");
-        assert_eq!(label_from_typed("\u{1a}", false), None, "Control types control characters");
-        assert_eq!(label_from_typed(" ", false), None);
-        assert_eq!(label_from_typed("\u{F704}", false), None, "function keys type private characters");
-        assert_eq!(label_from_typed("", false), None);
-        assert_eq!(label_from_typed("ab", false), None);
+        assert_eq!(label_from_typed("z", 0).as_deref(), Some("Z"));
+        assert_eq!(label_from_typed("ö", 0).as_deref(), Some("Ö"));
+        assert_eq!(label_from_typed("Z", FLAG_SHIFT).as_deref(), Some("Z"), "Shift + a letter is the letter");
+        assert_eq!(label_from_typed("z", FLAG_COMMAND).as_deref(), Some("Z"));
+        assert_eq!(label_from_typed("!", FLAG_SHIFT), None, "Shift + 1 is the 1 key");
+        assert_eq!(label_from_typed("é", FLAG_OPTION), None, "Option types special characters");
+        assert_eq!(label_from_typed("\u{1a}", FLAG_CONTROL), None, "Control types control characters");
+        assert_eq!(label_from_typed(" ", 0), None);
+        assert_eq!(label_from_typed("\u{F704}", 0), None, "function keys type private characters");
+        assert_eq!(label_from_typed("", 0), None);
+        assert_eq!(label_from_typed("ab", 0), None);
     }
 
     #[test]

@@ -134,6 +134,24 @@ pub fn focused_window_center(pid: i32) -> Option<(f64, f64)> {
     Some((origin.x + size.width / 2.0, origin.y + size.height / 2.0))
 }
 
+/// Ask app `pid` to build its accessibility tree. Electron and Chromium apps (Slack, VS Code,
+/// Discord, Chrome) build it only when an assistive app asks, through `AXManualAccessibility`;
+/// without it their fields cannot be read, so smart spacing and verification would be off there.
+/// Other apps answer that the attribute is unsupported, which changes nothing.
+pub fn expose(pid: i32) {
+    if !ffi::trusted() || pid <= 0 {
+        return;
+    }
+    // SAFETY: Create returns an owned element.
+    let Some(app) = (unsafe { Cf::from_owned(ffi::AXUIElementCreateApplication(pid)) }) else { return };
+    let Some(name) = ffi::cf_string("AXManualAccessibility") else { return };
+    // SAFETY: valid element and name; kCFBooleanTrue is a constant.
+    unsafe {
+        ffi::AXUIElementSetMessagingTimeout(app.as_ptr(), 0.3);
+        ffi::AXUIElementSetAttributeValue(app.as_ptr(), name.as_ptr(), ffi::kCFBooleanTrue);
+    }
+}
+
 /// Bring app `pid` to the front through Accessibility, which works where activating it as an app
 /// is refused (macOS 14 only lets the active app hand over activation).
 pub fn raise(pid: i32) -> bool {
