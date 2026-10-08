@@ -333,7 +333,7 @@ app.run;
         let script = std::env::temp_dir().join("talkr-test-field.js");
         std::fs::write(&script, TEST_FIELD_APP).unwrap();
         let child = std::process::Command::new("/usr/bin/osascript").args(["-l", "JavaScript"]).arg(&script).spawn().unwrap();
-        let field = TestField(child);
+        let mut field = TestField(child);
         let pid = field.0.id() as i32;
 
         let started = Instant::now();
@@ -356,10 +356,9 @@ app.run;
                 }
                 workspace::activate(&Target { pid, ..Target::default() });
             }
-            assert!(
-                workspace::is_running(&Target { pid, ..Target::default() }),
-                "the test field app ended before it got focus"
-            );
+            if let Ok(Some(status)) = field.0.try_wait() {
+                panic!("the test field app ended before it got focus: {status}");
+            }
             if last_note.elapsed() >= Duration::from_secs(5) {
                 last_note = Instant::now();
                 note(format!("waiting: front {front:?}, focused {focused:?}"));
