@@ -141,6 +141,10 @@ ashpd = { version = "0.13", default-features = false, features = [
 futures-util = { version = "0.3", default-features = false }
 # The clipboard without a focused window, through the data-control protocols (wlroots, KDE).
 wl-clipboard-rs = "0.9"
+# Talkr's own data-control source for pastes, which counts the apps' reads (the versions
+# wl-clipboard-rs already pulls in).
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

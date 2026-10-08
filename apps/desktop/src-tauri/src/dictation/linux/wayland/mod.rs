@@ -7,7 +7,8 @@
 //!   the system settings starts and stops dictation.
 //! - **Inserting** (`insert`): the RemoteDesktop portal's keyboard types or presses
 //!   Shift + Insert; the clipboard is set through data-control or the Clipboard portal
-//!   (`clipboard`, `remote`). Without the portal the text is copied.
+//!   (`clipboard`, `source`, `remote`). Without the portal the text is copied. The clipboard
+//!   put back after a paste is served by Talkr until another app takes it (see `remote`).
 //!
 //! Wayland does not say which window has focus, so text goes wherever the cursor is when it is
 //! ready (the focus policy and per-app rules cannot apply), and Escape cannot cancel (the pill's
@@ -20,6 +21,7 @@ mod plan;
 mod portal;
 mod remote;
 mod shortcuts;
+mod source;
 mod trigger;
 
 use std::time::Duration;
@@ -29,6 +31,10 @@ use crate::dictation::HotkeyEvent;
 
 /// How long the settings page's "Allow" waits for the user to answer the desktop's dialog.
 const APPROVAL_WAIT: Duration = Duration::from_secs(120);
+/// How long turning dictation on waits for keyboard access allowed before to come back, so the
+/// status the engine sends right after shows how it went. The restore goes on in the background
+/// after that (the page checks again when it regains focus).
+const START_RESTORE_WAIT: Duration = Duration::from_secs(3);
 
 pub struct Os;
 
@@ -72,7 +78,12 @@ impl Backend for Os {
 
     fn capabilities() -> Capabilities {
         let av = portal::availability();
-        let mut caps = plan::capabilities(&av, shortcut_note().as_deref().filter(|_| av.shortcuts), hyprland_line().as_deref());
+        let mut caps = plan::capabilities(
+            &av,
+            shortcut_note().as_deref().filter(|_| av.shortcuts),
+            hyprland_line().as_deref(),
+            shortcuts::no_releases(),
+        );
         // The session binds after `start_hotkeys` returned, so its failure is only known here.
         if let Some(error) = shortcuts::report().error.filter(|_| av.shortcuts && !shortcuts::running()) {
             if let Some(note) = caps.note.as_mut() {
@@ -87,8 +98,9 @@ impl Backend for Os {
             // Nothing to allow: this desktop cannot let apps type (the note says so).
             return Permission::NotNeeded;
         }
-        // Brings back access allowed before, without a dialog.
-        if remote::ensure(false, Duration::ZERO).is_some() {
+        // Only looks: the status is asked for often (also with dictation off, and right after
+        // turning it off), and must never open keyboard access.
+        if remote::allowed() {
             return Permission::Granted;
         }
         let mut detail = "Talkr types your words through the desktop's remote-desktop portal. Allow it once (and let \
@@ -101,6 +113,8 @@ impl Backend for Os {
     }
 
     fn request_permission() {
+        // The user asked: a shortcut binding they declined is asked for again too.
+        shortcuts::retry();
         if portal::availability().keyboard {
             remote::ensure(true, APPROVAL_WAIT);
         }
@@ -110,7 +124,7 @@ impl Backend for Os {
         let av = portal::settled_availability();
         if av.keyboard {
             // Bring back keyboard access allowed in an earlier run, before the first dictation.
-            remote::ensure(false, Duration::ZERO);
+            remote::ensure(false, START_RESTORE_WAIT);
         }
         if !av.shortcuts {
             return Err("This Wayland desktop has no global-shortcuts portal, so Talkr cannot listen for a shortcut. \
@@ -138,8 +152,11 @@ impl Backend for Os {
         shortcuts::configure(shortcuts::bindings(dictate, paste_last));
     }
 
-    // Escape cannot be seen on Wayland: the pill's cancel button stops a dictation.
-    fn set_recording(_recording: bool) {}
+    // Escape cannot be seen on Wayland: the pill's cancel button stops a dictation. Recording
+    // still matters to a shortcut that toggles (see `shortcuts::Presses`).
+    fn set_recording(recording: bool) {
+        shortcuts::set_recording(recording);
+    }
 
     fn set_capturing(capturing: bool) {
         shortcuts::capture(capturing);

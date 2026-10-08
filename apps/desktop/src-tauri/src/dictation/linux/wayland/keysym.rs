@@ -54,6 +54,20 @@ pub fn held_after(strokes: &[Stroke], sent: usize) -> Vec<u32> {
     held
 }
 
+/// The keys that may still be down after a failure: `confirmed` events went through and the
+/// ones up to `attempted` may or may not have (a call that timed out can still reach the
+/// desktop). Both outcomes are covered, so an in-flight press is released and so is a key
+/// whose release was in flight; releasing a key that is already up does nothing.
+pub fn maybe_held(strokes: &[Stroke], confirmed: usize, attempted: usize) -> Vec<u32> {
+    let mut keys = held_after(strokes, confirmed);
+    for key in held_after(strokes, attempted.max(confirmed)) {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +123,21 @@ mod tests {
         assert_eq!(held_after(&p, 3), vec![SHIFT_L]);
         assert!(held_after(&p, 4).is_empty());
         assert!(held_after(&p, 99).is_empty());
+    }
+
+    #[test]
+    fn a_key_in_flight_is_released_too() {
+        let p = paste();
+        // Insert's press timed out: it may have arrived, so it is released with Shift.
+        assert_eq!(maybe_held(&p, 1, 2), vec![SHIFT_L, INSERT]);
+        // Insert's release timed out: it may not have arrived.
+        assert_eq!(maybe_held(&p, 2, 3), vec![SHIFT_L, INSERT]);
+        // Nothing went through, Shift's press was in flight.
+        assert_eq!(maybe_held(&p, 0, 1), vec![SHIFT_L]);
+        assert!(maybe_held(&p, 0, 0).is_empty());
+        assert!(maybe_held(&p, 4, 4).is_empty());
+        let typed = strokes("ab");
+        // 'b' went down, its release was in flight.
+        assert_eq!(maybe_held(&typed, 3, 4), vec![0x62]);
     }
 }

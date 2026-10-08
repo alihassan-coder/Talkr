@@ -39,10 +39,14 @@ fn detect(forced: Option<&str>, session_type: Option<&str>, wayland_display: boo
         Some("wayland") => return Session::Wayland,
         _ => {}
     }
-    if session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland")) || (session_type.is_none() && wayland_display) {
-        Session::Wayland
-    } else {
-        Session::X11
+    // A compositor started from a text console (sway, Hyprland) runs in a "tty" session: the
+    // Wayland socket is what counts there. Only an X11 session that also has one (a nested
+    // compositor) stays on X11.
+    match session_type {
+        Some(t) if t.eq_ignore_ascii_case("x11") => Session::X11,
+        Some(t) if t.eq_ignore_ascii_case("wayland") => Session::Wayland,
+        _ if wayland_display => Session::Wayland,
+        _ => Session::X11,
     }
 }
 
@@ -215,6 +219,14 @@ mod tests {
         assert_eq!(detect(None, Some("x11"), true), Session::X11);
         assert_eq!(detect(None, None, true), Session::Wayland);
         assert_eq!(detect(None, None, false), Session::X11);
+        // sway or Hyprland started from a TTY.
+        assert_eq!(detect(None, Some("tty"), true), Session::Wayland);
+        assert_eq!(detect(None, Some("TTY"), true), Session::Wayland);
+        assert_eq!(detect(None, Some("unspecified"), true), Session::Wayland);
+        assert_eq!(detect(None, Some("tty"), false), Session::X11);
+        assert_eq!(detect(None, Some("X11"), true), Session::X11);
+        assert_eq!(detect(None, Some("wayland"), false), Session::Wayland);
+        assert_eq!(detect(Some("x11"), Some("tty"), true), Session::X11);
         assert_eq!(detect(Some("X11"), Some("wayland"), true), Session::X11);
         assert_eq!(detect(Some("wayland"), Some("x11"), false), Session::Wayland);
         assert_eq!(detect(Some("bogus"), Some("x11"), false), Session::X11);
