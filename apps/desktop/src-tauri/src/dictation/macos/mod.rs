@@ -219,4 +219,94 @@ mod tests {
         assert_eq!(d.copied.as_deref(), Some("No text field was selected"));
         assert!(!d.clipboard_failed);
     }
+
+    /// A text field of the test's own in another process: a small Cocoa app run by `osascript`
+    /// (JavaScript for Automation), ended when dropped.
+    struct TestField(std::process::Child);
+
+    impl Drop for TestField {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    const TEST_FIELD_APP: &str = r#"
+ObjC.import('Cocoa');
+var app = $.NSApplication.sharedApplication;
+app.setActivationPolicy(0);
+var win = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(300, 300, 520, 260), 1, 2, false);
+var view = $.NSTextView.alloc.initWithFrame($.NSMakeRect(0, 0, 520, 260));
+view.setString($('Notes:'));
+view.setAutomaticSpellingCorrectionEnabled(false);
+view.setAutomaticTextReplacementEnabled(false);
+view.setAutomaticQuoteSubstitutionEnabled(false);
+view.setAutomaticDashSubstitutionEnabled(false);
+view.setContinuousSpellCheckingEnabled(false);
+win.setContentView(view);
+win.setTitle($('Talkr test field'));
+win.makeKeyAndOrderFront(null);
+win.makeFirstResponder(view);
+view.setSelectedRange($.NSMakeRange(6, 0));
+app.activateIgnoringOtherApps(true);
+app.run;
+"#;
+
+    /// Dictation into a real text field on a real desktop, the whole way: the target is
+    /// snapshotted, the field read through Accessibility, the text pasted with ⌘V and then typed,
+    /// both read back, and the user's clipboard given back. Runs on CI runners, which allow
+    /// Accessibility (it types into the test's own window only).
+    #[test]
+    fn dictation_reaches_a_real_text_field() {
+        use crate::dictation::settings::InsertMethod;
+        use std::time::{Duration, Instant};
+        if std::env::var_os("CI").is_none() || !ffi::trusted() {
+            return;
+        }
+        let _turn = pasteboard::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let script = std::env::temp_dir().join("talkr-test-field.js");
+        std::fs::write(&script, TEST_FIELD_APP).unwrap();
+        let child = std::process::Command::new("/usr/bin/osascript").args(["-l", "JavaScript"]).arg(&script).spawn().unwrap();
+        let field = TestField(child);
+        let pid = field.0.id() as i32;
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let target = loop {
+            let front = Os::snapshot();
+            let focused = ax::inspect();
+            if let Some(front) = front.clone().filter(|t| t.pid == pid) {
+                if focused.as_ref().is_some_and(|f| f.pid == pid && f.role == "AXTextArea") {
+                    break front;
+                }
+            } else {
+                workspace::activate(&Target { pid, ..Target::default() });
+            }
+            assert!(Instant::now() < deadline, "the test field never got focus: front {front:?}, focused {focused:?}");
+            std::thread::sleep(Duration::from_millis(250));
+        };
+        let value = || ax::inspect().and_then(|f| f.value).unwrap_or_default();
+        assert_eq!(value(), "Notes:");
+
+        pasteboard::put_text("the user's clipboard", false).unwrap();
+        let d = Os::deliver("hello from Talkr", Some(&target), &DictationSettings::default(), None);
+        assert!(d.inserted && d.copied.is_none(), "{}", d.summary());
+        assert_eq!(d.method, Some("paste"));
+        assert!(d.verified, "{}", d.summary());
+        assert!(!d.password);
+        let after_paste = value();
+        assert!(after_paste.starts_with("Notes: ") && after_paste.ends_with("ello from Talkr"), "{after_paste:?}");
+        assert_eq!(pasteboard::text().as_deref(), Some("the user's clipboard"), "the clipboard is given back");
+
+        let typing = DictationSettings { insert_method: InsertMethod::Type, ..DictationSettings::default() };
+        let d = Os::deliver("and typed words, ünïcode 😀", Some(&target), &typing, None);
+        assert!(d.inserted && d.copied.is_none(), "{}", d.summary());
+        assert_eq!(d.method, Some("type"));
+        assert!(d.verified, "{}", d.summary());
+        let after_typing = value();
+        assert!(after_typing.starts_with(&after_paste) && after_typing.ends_with(" and typed words, ünïcode 😀"), "{after_typing:?}");
+        assert_eq!(pasteboard::text().as_deref(), Some("the user's clipboard"), "typing leaves the clipboard alone");
+
+        drop(field);
+        let _ = std::fs::remove_file(script);
+    }
 }

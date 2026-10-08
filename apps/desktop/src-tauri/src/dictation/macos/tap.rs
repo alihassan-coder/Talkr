@@ -348,6 +348,7 @@ mod tests {
         if std::env::var_os("CI").is_none() || !ffi::trusted() {
             return;
         }
+        let _keyboard = super::super::pasteboard::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let f19 = Shortcut { ctrl: false, shift: false, alt: false, win: false, key: Some(0x82), key_label: None };
         let (tx, rx) = flume::unbounded();
         configure(Some(&f19), None);

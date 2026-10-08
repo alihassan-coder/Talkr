@@ -121,6 +121,7 @@ mod tests {
         if std::env::var_os("CI").is_none() {
             return;
         }
+        let _turn = super::super::pasteboard::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert!(!shortcut_held(&Shortcut::ctrl_win()));
         assert!(!shortcut_held(&Shortcut::alt_shift_v()));
         assert!(wait_for_modifiers_released(Duration::from_millis(100)));

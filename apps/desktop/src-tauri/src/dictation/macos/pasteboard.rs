@@ -117,7 +117,7 @@ pub fn restore(saved: Saved, count: isize) -> bool {
     })
 }
 
-/// Tests that use the real pasteboard take turns.
+/// Tests that use the real pasteboard, post keys or move focus take turns.
 #[cfg(test)]
 pub static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
