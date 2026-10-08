@@ -304,8 +304,15 @@ impl Dictation {
             capabilities,
             permission: Os::permission(),
             // A listener that is up has overcome whatever stopped it before (a permission
-            // granted since, say).
-            error: if running { None } else { lock(&self.shared.error).clone() },
+            // granted since, say); a shortcut another program holds is asked about live, so it
+            // shows while the listener runs and clears once the shortcut is free.
+            error: if running && settings.enabled {
+                Os::hotkeys_problem()
+            } else if running {
+                None
+            } else {
+                lock(&self.shared.error).clone()
+            },
             model_id,
             warm,
             has_last: lock(&self.shared.last_text).is_some(),
@@ -678,11 +685,8 @@ impl Controller {
                 settings.paste_last_enabled.then_some(&settings.paste_last_shortcut),
             );
             if let Some(problem) = Os::hotkeys_problem() {
-                let mut error = lock(&self.shared.error);
-                if error.is_none() {
-                    log::warn!("{}", problem);
-                    *error = Some(problem);
-                }
+                // Shown through status(), which asks the backend each time.
+                log::warn!("{}", problem);
             }
         } else {
             Os::configure_hotkeys(None, None);
