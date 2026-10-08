@@ -138,6 +138,12 @@ pub trait Backend {
     /// The shortcuts to listen for; `None` turns one off.
     fn configure_hotkeys(dictate: Option<&Shortcut>, paste_last: Option<&Shortcut>);
 
+    /// Why the shortcuts just configured cannot all be listened for (another program already
+    /// owns one), worded for the settings page. Asked right after `configure_hotkeys`.
+    fn hotkeys_problem() -> Option<String> {
+        None
+    }
+
     /// A dictation is recording: Escape cancels it (and should not reach the app).
     fn set_recording(recording: bool);
 

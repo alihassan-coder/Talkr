@@ -107,6 +107,13 @@ impl Backend for Os {
         }
     }
 
+    fn hotkeys_problem() -> Option<String> {
+        match session() {
+            Session::X11 => x11::Os::hotkeys_problem(),
+            Session::Wayland => wayland::Os::hotkeys_problem(),
+        }
+    }
+
     fn set_recording(recording: bool) {
         match session() {
             Session::X11 => x11::Os::set_recording(recording),
