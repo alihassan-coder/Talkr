@@ -1,7 +1,8 @@
 //! Dictation on Linux. X11 and Wayland work differently enough to need two backends:
 //!
-//! - **X11** (`x11`): Talkr reads the keyboard itself (XInput2), types with XTest, and asks the
-//!   window manager which window is active (EWMH).
+//! - **X11** (`x11`): Talkr grabs only the configured shortcuts (passive key grabs, like any
+//!   global-hotkey tool; general typing is never seen), types with XTest, and asks the window
+//!   manager which window is active (EWMH).
 //! - **Wayland** (`wayland`): apps may not read the keyboard or type into other apps. Talkr asks
 //!   the desktop through its portals instead: the GlobalShortcuts portal for the shortcut (press
 //!   and release) and the RemoteDesktop portal to type, each allowed once by the user.

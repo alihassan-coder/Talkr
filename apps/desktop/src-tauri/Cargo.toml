@@ -96,6 +96,9 @@ windows = { version = "0.62", features = [
 # under its heading; keep the headings apart so their changes merge cleanly. ----
 [target.'cfg(target_os = "linux")'.dependencies]
 # -- X11 backend (src/dictation/linux/x11) --
+# The X protocol in pure Rust (no libxcb or Xlib to install): passive key grabs for the shortcut,
+# XTEST to paste or type, selections for the clipboard, XKB for detectable auto-repeat.
+x11rb = { version = "0.14", default-features = false, features = ["xtest", "xkb"] }
 
 
 
