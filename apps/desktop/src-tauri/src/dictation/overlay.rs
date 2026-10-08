@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+use super::backend::Backend;
 use super::settings::OverlayPosition;
+use super::sys::{Os, Target};
 
 pub const LABEL: &str = "overlay";
 /// Logical size of the overlay window. The pill is drawn inside it, with room for its glow.
@@ -69,41 +71,30 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    /// Create the hidden overlay window.
+    /// Create the hidden overlay window. Transparent, undecorated, always on top, never focused.
     pub fn create(app: &AppHandle) -> tauri::Result<Self> {
-        #[cfg(windows)]
-        {
-            let window = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App("overlay.html".into()))
-                .title("Talkr dictation")
-                .inner_size(SIZE.0, SIZE.1)
-                .decorations(false)
-                .transparent(true)
-                .shadow(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .resizable(false)
-                .maximizable(false)
-                .minimizable(false)
-                .focused(false)
-                .focusable(false)
-                .visible(false)
-                .build()?;
-            window.set_ignore_cursor_events(true)?;
-        }
+        let builder = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App("overlay.html".into()))
+            .title("Talkr dictation")
+            .inner_size(SIZE.0, SIZE.1)
+            .decorations(false)
+            .shadow(false)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .maximizable(false)
+            .minimizable(false)
+            .focused(false)
+            .focusable(false)
+            .visible(false);
+        // macOS needs the private-API feature for transparent windows (enabled in Cargo.toml).
+        let window = builder.transparent(true).build()?;
+        window.set_ignore_cursor_events(true)?;
         Ok(Self { app: app.clone(), generation: Arc::new(AtomicU64::new(0)), gate: Arc::new(Mutex::new(())) })
     }
 
-    /// The overlay window's handle (Windows), to recognise it as the foreground window and to
-    /// own clipboard calls.
-    pub fn hwnd(&self) -> Option<isize> {
-        #[cfg(windows)]
-        {
-            self.app.get_webview_window(LABEL).and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize)
-        }
-        #[cfg(not(windows))]
-        {
-            None
-        }
+    pub fn window(&self) -> Option<tauri::WebviewWindow> {
+        self.app.get_webview_window(LABEL)
     }
 
     fn gate(&self) -> MutexGuard<'_, ()> {
@@ -138,19 +129,16 @@ impl Overlay {
         let _ = self.app.emit_to(LABEL, EVENT_LEVEL, Level { session, level });
     }
 
-    /// Show the window near `anchor` (the target window), without taking focus.
-    pub fn show(&self, anchor: isize, position: OverlayPosition) {
-        #[cfg(windows)]
-        if let Some(hwnd) = self.hwnd() {
-            super::win::show_overlay(hwnd, anchor, SIZE, position);
+    /// Show the window near `anchor` (the target), without taking focus.
+    pub fn show(&self, anchor: Option<&Target>, position: OverlayPosition) {
+        if let Some(window) = self.window() {
+            Os::show_overlay(&window, anchor, SIZE, position);
         }
-        #[cfg(not(windows))]
-        let _ = (anchor, position);
     }
 
     /// Clickable while the pill shows buttons (hands-free), click-through otherwise.
     pub fn set_interactive(&self, interactive: bool) {
-        if let Some(window) = self.app.get_webview_window(LABEL) {
+        if let Some(window) = self.window() {
             let _ = window.set_ignore_cursor_events(!interactive);
         }
     }
@@ -171,7 +159,10 @@ impl Overlay {
             std::thread::sleep(Duration::from_millis(320));
             let _gate = this.gate();
             if this.generation.load(Ordering::SeqCst) == hidden {
-                this.hide_window();
+                this.set_interactive(false);
+                if let Some(window) = this.window() {
+                    Os::hide_overlay(&window);
+                }
             }
         });
     }
@@ -180,14 +171,33 @@ impl Overlay {
     pub fn hide_latest_after(&self, delay: Duration) {
         self.hide_after(self.generation.load(Ordering::SeqCst), delay);
     }
+}
 
-    fn hide_window(&self) {
-        self.set_interactive(false);
-        #[cfg(windows)]
-        if let Some(hwnd) = self.hwnd() {
-            super::win::hide_overlay(hwnd);
-        }
+/// Place and show the overlay with Tauri's own window calls: centred on the monitor with the
+/// mouse (or the primary one), above the bottom edge of its work area or below the top. The
+/// default for systems without a better native way.
+pub fn show_portable(window: &tauri::WebviewWindow, logical: (f64, f64), position: OverlayPosition) {
+    let app = window.app_handle();
+    let monitor = app
+        .cursor_position()
+        .ok()
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let area = monitor.work_area();
+        let (w, h) = ((logical.0 * scale).round() as i32, (logical.1 * scale).round() as i32);
+        let margin = (14.0 * scale).round() as i32;
+        let x = area.position.x + (area.size.width as i32 - w) / 2;
+        let y = match position {
+            OverlayPosition::Bottom => area.position.y + area.size.height as i32 - h - margin,
+            OverlayPosition::Top => area.position.y + margin,
+        };
+        let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
+    let _ = window.set_always_on_top(true);
+    let _ = window.show();
 }
 
 #[cfg(test)]

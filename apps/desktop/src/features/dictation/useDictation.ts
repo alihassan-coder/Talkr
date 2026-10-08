@@ -14,6 +14,18 @@ import { defaultDictation } from '@/features/dictation/shortcut'
 
 const previewStatus: DictationStatus = {
   supported: true,
+  capabilities: {
+    os: 'windows',
+    supported: true,
+    holdToTalk: true,
+    modifierOnly: true,
+    recordsShortcut: true,
+    verifiesInsertion: true,
+    insertsText: true,
+    metaKey: 'Win',
+    note: null,
+  },
+  permission: { state: 'notNeeded' },
   active: false,
   error: null,
   modelId: null,

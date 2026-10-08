@@ -120,9 +120,35 @@ export interface DictationSettings {
   closeToTray: boolean
 }
 
-export interface DictationStatus {
-  /** Dictation works on this system (Windows for now). */
+/** What dictation can do on this system (mirrors `backend::Capabilities`). */
+export interface DictationCapabilities {
+  os: 'windows' | 'macos' | 'linux'
   supported: boolean
+  /** The shortcut's release is reported, so hold-to-talk works. */
+  holdToTalk: boolean
+  /** Shortcuts of modifiers alone (Ctrl + Win) work. */
+  modifierOnly: boolean
+  /** Talkr records the shortcut itself (false: the system's settings choose it). */
+  recordsShortcut: boolean
+  verifiesInsertion: boolean
+  /** Text is typed into other apps (false: copied for the user to paste). */
+  insertsText: boolean
+  /** What the Win key is called here: "Win", "⌘" or "Super". */
+  metaKey: string
+  note: string | null
+}
+
+/** Something the system must still allow (mirrors `backend::Permission`). */
+export type DictationPermission =
+  | { state: 'notNeeded' }
+  | { state: 'granted' }
+  | { state: 'missing'; title: string; detail: string; canRequest: boolean }
+
+export interface DictationStatus {
+  /** Dictation works on this system. */
+  supported: boolean
+  capabilities: DictationCapabilities
+  permission: DictationPermission
   /** The shortcut is being listened for. */
   active: boolean
   error: string | null

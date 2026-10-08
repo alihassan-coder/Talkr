@@ -1,20 +1,27 @@
 //! System-wide dictation: hold a shortcut in any app, speak, let go, and the words are typed
 //! where the cursor was.
 //!
-//! Three threads share the work. The keyboard hook (win::hook) only reports the shortcut. The
+//! This module is the engine every system shares: the state machine, the microphone,
+//! transcription, text clean-up, history and the pill. What differs per system (the shortcut,
+//! the focused app, inserting text, placing the pill) sits behind `backend::Backend`, with one
+//! implementation each for Windows (`win`), macOS (`macos`) and Linux (`linux`).
+//!
+//! Three threads share the work. The backend's listener only reports the shortcut. The
 //! controller owns the state machine (idle, recording, hands-free) and the microphone, and keeps
 //! the pill up to date. The worker turns each finished clip into text and inserts it, one clip at
 //! a time, so a new dictation can start while the last one is still being typed.
-//!
-//! Only Windows is supported for now: the hook, insertion and the overlay are Win32. Elsewhere
-//! `status()` says so and the settings page explains.
 
-#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
-
+pub mod backend;
+pub mod cues;
 pub mod overlay;
 pub mod settings;
 pub mod speech;
+pub mod sys;
 pub mod text;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod win;
 
@@ -32,14 +39,24 @@ use crate::db::{insert_history, HistoryItem, HistoryKind};
 use crate::engine_host::failure_to_error;
 use crate::error::{AppError, Result};
 use crate::AppState;
+use backend::{Backend, Capabilities, Cue, Delivery, Permission};
 use overlay::{Overlay, State as Pill, Tone};
 use settings::{ActivationMode, DictationSettings, Shortcut};
+use sys::{Os, Target};
 
 /// Main-window events.
 pub const EVENT_STATUS: &str = "dictation://status";
 pub const EVENT_CAPTURED: &str = "dictation://captured";
 pub const EVENT_SETTINGS: &str = "dictation://settings";
 pub const EVENT_DONE: &str = "dictation://done";
+
+/// Whether dictation works on this system at all.
+pub fn supported() -> bool {
+    Os::capabilities().supported
+}
+
+/// The paste keystroke, for messages.
+pub const PASTE_KEYS: &str = if cfg!(target_os = "macos") { "⌘V" } else { "Ctrl+V" };
 
 /// A press shorter than this, in Auto mode, starts hands-free dictation instead of hold-to-talk.
 const TAP: Duration = Duration::from_millis(320);
@@ -57,7 +74,7 @@ const TICK: Duration = Duration::from_millis(33);
 pub enum HotkeyEvent {
     DictateDown,
     DictateUp,
-    /// The modifiers of a modifier-only shortcut met another key: a Windows shortcut.
+    /// The modifiers of a modifier-only shortcut met another key: a system shortcut.
     Interrupted,
     /// Escape while recording.
     Cancel,
@@ -73,17 +90,24 @@ enum Input {
     /// The pill's cancel button.
     Cancel,
     CopyLast,
-    /// Settings changed: reconfigure the hook, autostart and warm-up.
+    /// Start a dictation, or finish the one running: `talkr --dictate`, for systems where Talkr
+    /// cannot listen for a shortcut itself (bind the command to a key in the system settings).
+    Toggle,
+    /// Settings changed: reconfigure the listener, autostart and warm-up.
     Reconfigure,
     Capture(bool),
 }
 
 /// For the settings page.
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     /// This platform supports dictation.
     pub supported: bool,
+    /// What dictation can do here (hold-to-talk, recording shortcuts, inserting text…).
+    pub capabilities: Capabilities,
+    /// What the system still has to allow.
+    pub permission: Permission,
     /// The shortcut is being listened for.
     pub active: bool,
     pub error: Option<String>,
@@ -172,16 +196,27 @@ impl Dictation {
         let _ = self.tx.send(Input::Capture(active));
     }
 
+    /// Start a dictation or finish the running one (`talkr --dictate`).
+    pub fn toggle(&self) {
+        let _ = self.tx.send(Input::Toggle);
+    }
+
+    /// Ask the system for what dictation still needs, then refresh.
+    pub fn request_permission(&self) {
+        Os::request_permission();
+        self.reconfigure();
+    }
+
     pub fn status(&self, state: &AppState) -> Status {
         let settings = state.settings().dictation.clone();
         let model_id = resolve_model(state, &settings);
         let warm = model_id.is_some() && state.engine.resident_model() == model_id;
+        let capabilities = Os::capabilities();
         Status {
-            supported: cfg!(windows),
-            #[cfg(windows)]
-            active: win::hook::is_running() && settings.enabled,
-            #[cfg(not(windows))]
-            active: false,
+            supported: capabilities.supported,
+            active: capabilities.supported && settings.enabled && Os::hotkeys_running(),
+            capabilities,
+            permission: Os::permission(),
             error: lock(&self.shared.error).clone(),
             model_id,
             warm,
@@ -255,7 +290,7 @@ pub fn resolve_model(state: &AppState, s: &DictationSettings) -> Option<String> 
 /// The model to keep loaded while dictation is on, if any.
 pub fn warm_model(state: &AppState) -> Option<String> {
     let s = state.settings().dictation.clone();
-    if !cfg!(windows) || !s.enabled || !s.keep_warm {
+    if !Os::capabilities().supported || !s.enabled || !s.keep_warm {
         return None;
     }
     resolve_model(state, &s)
@@ -304,12 +339,6 @@ fn emit_status(app: &AppHandle) {
         let _ = app.emit(EVENT_STATUS, d.status(&state));
     }
 }
-
-/// Where the text should go, per platform.
-#[cfg(windows)]
-type Target = win::target::Target;
-#[cfg(not(windows))]
-type Target = ();
 
 struct Session {
     id: u64,
@@ -382,15 +411,8 @@ impl Controller {
         let mode = self.app.state::<AppState>().settings().dictation.mode;
         match input {
             Input::Hotkey(HotkeyEvent::DictateDown) => {
-                // Mark Win/Alt as used right away, on every press (stopping hands-free too): when
-                // they are let go, Windows must not open Start or a menu bar.
-                #[cfg(windows)]
-                {
-                    let shortcut = self.app.state::<AppState>().settings().dictation.shortcut.clone();
-                    if shortcut.win || shortcut.alt {
-                        win::keys::neutralize_modifier_release();
-                    }
-                }
+                let shortcut = self.app.state::<AppState>().settings().dictation.shortcut.clone();
+                Os::on_shortcut_pressed(&shortcut);
                 if let Some(session) = &self.session {
                     if session.locked || mode == ActivationMode::Toggle {
                         self.finish();
@@ -434,6 +456,13 @@ impl Controller {
                     self.finish();
                 }
             }
+            Input::Toggle => {
+                if self.session.is_some() {
+                    self.finish();
+                } else {
+                    self.begin(true);
+                }
+            }
             Input::Hotkey(HotkeyEvent::PasteLast) => {
                 let _ = self.jobs.send(Job::PasteLast);
             }
@@ -452,15 +481,15 @@ impl Controller {
             }
             Input::Capture(active) => {
                 self.capturing = active;
-                #[cfg(windows)]
-                {
-                    if active {
-                        if let Err(e) = win::hook::start(self.hotkeys.clone()) {
-                            *lock(&self.shared.error) = Some(e);
-                        }
+                if active {
+                    if let Err(e) = Os::start_hotkeys(self.hotkeys.clone()) {
+                        *lock(&self.shared.error) = Some(e.clone());
+                        // The page is waiting for a shortcut that cannot come: tell it.
+                        self.capturing = false;
+                        let _ = self.app.emit(EVENT_CAPTURED, Option::<Shortcut>::None);
                     }
-                    win::hook::set_capturing(active);
                 }
+                Os::set_capturing(self.capturing);
                 if !active {
                     self.apply_settings();
                 }
@@ -472,28 +501,25 @@ impl Controller {
     /// Bring the hook, autostart and model in line with the settings.
     fn apply_settings(&mut self) {
         let settings = self.app.state::<AppState>().settings().dictation.clone();
-        #[cfg(windows)]
-        {
-            if settings.enabled {
-                match win::hook::start(self.hotkeys.clone()) {
-                    Ok(()) => *lock(&self.shared.error) = None,
-                    Err(e) => {
-                        log::error!("{}", e);
-                        *lock(&self.shared.error) = Some(e);
-                    }
+        if settings.enabled && Os::capabilities().supported {
+            match Os::start_hotkeys(self.hotkeys.clone()) {
+                Ok(()) => *lock(&self.shared.error) = None,
+                Err(e) => {
+                    log::error!("{}", e);
+                    *lock(&self.shared.error) = Some(e);
                 }
-                win::hook::configure(
-                    Some(&settings.shortcut),
-                    settings.paste_last_enabled.then_some(&settings.paste_last_shortcut),
-                );
-            } else {
-                win::hook::configure(None, None);
-                if !self.capturing {
-                    win::hook::stop();
-                }
-                if self.session.is_some() {
-                    self.cancel(false);
-                }
+            }
+            Os::configure_hotkeys(
+                Some(&settings.shortcut),
+                settings.paste_last_enabled.then_some(&settings.paste_last_shortcut),
+            );
+        } else {
+            Os::configure_hotkeys(None, None);
+            if !self.capturing {
+                Os::stop_hotkeys();
+            }
+            if self.session.is_some() {
+                self.cancel(false);
             }
         }
         sync_autostart(&self.app, settings.launch_at_login);
@@ -503,7 +529,7 @@ impl Controller {
         emit_status(&self.app);
     }
 
-    fn notice(&self, tone: Tone, title: &str, detail: Option<String>, anchor: isize) {
+    fn notice(&self, tone: Tone, title: &str, detail: Option<String>, anchor: Option<&Target>) {
         let session = self.next_session;
         self.pill(Pill::Notice { session, tone, title: title.into(), detail });
         if let Some(o) = &self.overlay {
@@ -511,9 +537,8 @@ impl Controller {
             o.show(anchor, position);
             o.hide_latest_after(Duration::from_millis(2_800));
         }
-        #[cfg(windows)]
         if self.app.state::<AppState>().settings().dictation.sounds {
-            win::sound::play(win::sound::Cue::Problem);
+            Os::play(Cue::Problem);
         }
     }
 
@@ -523,14 +548,8 @@ impl Controller {
         if !settings.enabled {
             return;
         }
-        #[cfg(windows)]
-        let target = win::target::snapshot();
-        #[cfg(not(windows))]
-        let target: Option<Target> = None;
-        #[cfg(windows)]
-        let anchor = target.as_ref().map(|t| t.hwnd).unwrap_or(0);
-        #[cfg(not(windows))]
-        let anchor = 0;
+        let target = Os::snapshot();
+        let anchor = target.as_ref();
 
         let Some(model_id) = resolve_model(&state, &settings) else {
             self.notice(Tone::Warn, "No speech model yet", Some("Open Talkr › Dictation to download one".into()), anchor);
@@ -567,19 +586,14 @@ impl Controller {
 
         let id = self.next_session;
         self.next_session += 1;
-        #[cfg(windows)]
-        let app_label = target.as_ref().and_then(|t| win::target::app_label(&t.exe)).filter(|_| settings.show_target);
-        #[cfg(not(windows))]
-        let app_label = None;
-        #[cfg(windows)]
-        win::hook::set_recording(true);
+        let app_label = target.as_ref().and_then(Os::app_label).filter(|_| settings.show_target);
+        Os::set_recording(true);
         self.shared.recording.store(true, Ordering::SeqCst);
 
-        #[cfg(windows)]
         log::info!(
             "dictation started{} into {}",
             if locked { " hands-free" } else { "" },
-            target.as_ref().map(|t| t.exe.as_str()).filter(|e| !e.is_empty()).unwrap_or("an unknown window")
+            target.as_ref().and_then(Os::app_id).unwrap_or_else(|| "an unknown window".into())
         );
         let modifier_only = settings.shortcut.key.is_none();
         let now = Instant::now();
@@ -611,17 +625,12 @@ impl Controller {
         if !session.shown && Instant::now() >= session.show_at {
             session.shown = true;
             if let Some(o) = &self.overlay {
-                #[cfg(windows)]
-                let anchor = session.target.as_ref().map(|t| t.hwnd).unwrap_or(0);
-                #[cfg(not(windows))]
-                let anchor = 0;
-                o.show(anchor, session.settings.overlay_position);
+                o.show(session.target.as_ref(), session.settings.overlay_position);
             }
             // With the pill, not on the key press: Ctrl + Win + Left (switching desktops) starts
             // like a dictation and should stay silent.
-            #[cfg(windows)]
             if session.settings.sounds {
-                win::sound::play(win::sound::Cue::Start);
+                Os::play(Cue::Start);
             }
         }
         if session.shown {
@@ -636,9 +645,8 @@ impl Controller {
         }
         // Backstop for a release the hook never saw (let go while an elevated window or the lock
         // screen had the keyboard): a held dictation whose keys are up ends as if released.
-        #[cfg(windows)]
-        if !session.locked {
-            if win::keys::shortcut_held(&session.settings.shortcut) {
+        if let (false, Some(held)) = (session.locked, Os::shortcut_held(&session.settings.shortcut)) {
+            if held {
                 session.released_ticks = 0;
             } else {
                 session.released_ticks += 1;
@@ -657,8 +665,7 @@ impl Controller {
 
     fn end_recording(&mut self) -> Option<(Session, Option<PendingStop>)> {
         let session = self.session.take()?;
-        #[cfg(windows)]
-        win::hook::set_recording(false);
+        Os::set_recording(false);
         self.shared.recording.store(false, Ordering::SeqCst);
         if let Some(o) = &self.overlay {
             o.set_interactive(false);
@@ -669,9 +676,8 @@ impl Controller {
 
     fn finish(&mut self) {
         let Some((session, pending)) = self.end_recording() else { return };
-        #[cfg(windows)]
         if session.settings.sounds {
-            win::sound::play(win::sound::Cue::Stop);
+            Os::play(Cue::Stop);
         }
         let Some(pending) = pending else {
             let _ = std::fs::remove_file(&session.clip);
@@ -733,11 +739,7 @@ impl Controller {
 impl Session {
     fn shown_now(&self, overlay: Option<&Overlay>) {
         if let Some(o) = overlay {
-            #[cfg(windows)]
-            let anchor = self.target.as_ref().map(|t| t.hwnd).unwrap_or(0);
-            #[cfg(not(windows))]
-            let anchor = 0;
-            o.show(anchor, self.settings.overlay_position);
+            o.show(self.target.as_ref(), self.settings.overlay_position);
         }
     }
 }
@@ -785,12 +787,9 @@ impl Worker {
     }
 
     fn problem(&self, session: u64, tone: Tone, title: &str, detail: Option<String>, sounds: bool) {
-        #[cfg(windows)]
         if sounds && !self.shared.recording.load(Ordering::SeqCst) {
-            win::sound::play(win::sound::Cue::Problem);
+            Os::play(Cue::Problem);
         }
-        #[cfg(not(windows))]
-        let _ = sounds;
         self.pill(Pill::Notice { session, tone, title: title.into(), detail }, Some(Duration::from_millis(2_800)));
     }
 
@@ -845,7 +844,7 @@ impl Worker {
                 session,
                 Tone::Warn,
                 "Your microphone is silent",
-                Some("Check it isn't muted, and that Windows lets desktop apps use it".into()),
+                Some("Check it isn't muted, and that your system lets Talkr use it".into()),
                 settings.sounds,
             );
             return Ok(());
@@ -955,7 +954,7 @@ impl Worker {
             Some(ref reason) => self.problem(
                 session,
                 Tone::Warn,
-                delivery.not_inserted_title(),
+                &delivery.not_inserted_title(),
                 Some(reason.to_string()),
                 settings.sounds,
             ),
@@ -967,43 +966,9 @@ impl Worker {
         Ok(())
     }
 
-    #[cfg(windows)]
     fn deliver(&self, clean: &str, target: Option<&Target>, settings: &DictationSettings) -> Delivery {
-        use win::insert::{self, CopyReason, Outcome, Prepared};
-        let owner = self.overlay.as_ref().and_then(|o| o.hwnd());
-        let copy = |reason: CopyReason| {
-            let copied = win::clipboard::put_text(clean, owner.map(win::target::hwnd), false).is_some();
-            Delivery { copied: Some(reason.message().to_string()), clipboard_failed: !copied, ..Delivery::default() }
-        };
-        let Some(target) = target else { return copy(CopyReason::NoTextField) };
-        match insert::prepare(target, settings, owner.unwrap_or(0)) {
-            Prepared::Copy(reason) => copy(reason),
-            Prepared::Ready(ready) => {
-                let password = ready.field.as_ref().is_some_and(|f| f.password);
-                let before = ready.field.as_ref().and_then(|f| f.before_caret.as_deref());
-                let text = match before {
-                    Some(before) if settings.smart_spacing => text::fit_to_context(clean, before),
-                    _ => clean.to_string(),
-                };
-                match insert::deliver(&ready, &text, settings, owner) {
-                    Outcome::Inserted { method, verdict, learned_typing } => Delivery {
-                        inserted: true,
-                        verified: verdict == win::uia::Verdict::Arrived,
-                        method: Some(method.name()),
-                        password,
-                        copied: None,
-                        clipboard_failed: false,
-                        learned_typing_for: learned_typing.then(|| ready.target.exe.clone()).filter(|e| !e.is_empty()),
-                    },
-                    Outcome::Copied(reason) => Delivery { password, ..copy(reason) },
-                }
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    fn deliver(&self, _clean: &str, _target: Option<&Target>, _settings: &DictationSettings) -> Delivery {
-        Delivery { copied: Some("Dictation is not supported on this system".into()), ..Delivery::default() }
+        let owner = self.overlay.as_ref().and_then(Overlay::window);
+        Os::deliver(clean, target, settings, owner.as_ref())
     }
 
     /// Remember that typing works in `exe` where pasting did not.
@@ -1035,23 +1000,18 @@ impl Worker {
             self.problem(0, Tone::Info, "Nothing dictated yet", None, false);
             return;
         };
-        #[cfg(windows)]
-        {
-            let owner = self.overlay.as_ref().and_then(|o| o.hwnd()).map(win::target::hwnd);
-            if win::clipboard::put_text(&text, owner, false).is_some() {
-                let copied = Pill::Notice {
-                    session: 0,
-                    tone: Tone::Info,
-                    title: "Last dictation copied".into(),
-                    detail: Some("Press Ctrl+V to paste".into()),
-                };
-                self.pill(copied, Some(Duration::from_millis(2_000)));
-            } else {
-                self.problem(0, Tone::Warn, "The clipboard is busy", Some("Try again in a moment".into()), false);
-            }
+        let owner = self.overlay.as_ref().and_then(Overlay::window);
+        if Os::copy(&text, owner.as_ref()) {
+            let copied = Pill::Notice {
+                session: 0,
+                tone: Tone::Info,
+                title: "Last dictation copied".into(),
+                detail: Some(format!("Press {} to paste", PASTE_KEYS)),
+            };
+            self.pill(copied, Some(Duration::from_millis(2_000)));
+        } else {
+            self.problem(0, Tone::Warn, "The clipboard is busy", Some("Try again in a moment".into()), false);
         }
-        #[cfg(not(windows))]
-        let _ = text;
     }
 
     fn paste_last(&self) {
@@ -1059,53 +1019,14 @@ impl Worker {
             self.problem(0, Tone::Info, "Nothing dictated yet", None, false);
             return;
         };
-        #[cfg(windows)]
-        {
-            let settings = self.app.state::<AppState>().settings().dictation.clone();
-            let target = win::target::snapshot();
-            let delivery = self.deliver(&text, target.as_ref(), &DictationSettings {
-                focus_policy: settings::FocusPolicy::Current,
-                ..settings.clone()
-            });
-            if let Some(reason) = &delivery.copied {
-                self.problem(0, Tone::Warn, delivery.not_inserted_title(), Some(reason.clone()), settings.sounds);
-            }
-        }
-        #[cfg(not(windows))]
-        let _ = text;
-    }
-}
-
-#[derive(Debug, Default)]
-struct Delivery {
-    inserted: bool,
-    /// Read back from the field after inserting.
-    verified: bool,
-    method: Option<&'static str>,
-    /// The field was a password box: keep the text out of history.
-    password: bool,
-    /// Why the text went to the clipboard instead.
-    copied: Option<String>,
-    /// It could not even be copied (another app held the clipboard).
-    clipboard_failed: bool,
-    learned_typing_for: Option<String>,
-}
-
-impl Delivery {
-    /// The pill's title when the text was not inserted.
-    fn not_inserted_title(&self) -> &'static str {
-        if self.clipboard_failed {
-            "Not inserted — press your paste-again shortcut"
-        } else {
-            "Copied — press Ctrl+V to paste"
-        }
-    }
-
-    fn summary(&self) -> String {
-        match (&self.copied, self.method) {
-            (Some(reason), _) => format!("copied ({})", reason),
-            (None, Some(method)) => format!("inserted by {}{}", method, if self.verified { ", verified" } else { "" }),
-            (None, None) => "inserted".into(),
+        let settings = self.app.state::<AppState>().settings().dictation.clone();
+        let target = Os::snapshot();
+        let delivery = self.deliver(&text, target.as_ref(), &DictationSettings {
+            focus_policy: settings::FocusPolicy::Current,
+            ..settings.clone()
+        });
+        if let Some(reason) = &delivery.copied {
+            self.problem(0, Tone::Warn, &delivery.not_inserted_title(), Some(reason.clone()), settings.sounds);
         }
     }
 }

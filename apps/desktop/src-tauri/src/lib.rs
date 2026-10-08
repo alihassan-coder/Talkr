@@ -17,7 +17,6 @@ mod engine_host;
 mod error;
 mod hardware;
 mod paths;
-#[cfg(windows)]
 mod tray;
 
 use audio::record::AudioRecorder;
@@ -110,6 +109,8 @@ const ENGINE_IDLE_NO_MODEL: Duration = Duration::from_secs(60);
 
 /// Passed by the login item: start in the tray, without the window.
 const STARTED_HIDDEN_ARG: &str = "--hidden";
+/// Start a dictation, or finish the running one.
+const DICTATE_ARG: &str = "--dictate";
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -123,7 +124,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 fn keeps_running_in_tray(app: &tauri::AppHandle) -> bool {
     let state = app.state::<AppState>();
     let settings = state.settings();
-    cfg!(windows) && settings.dictation.enabled && settings.dictation.close_to_tray
+    dictation::supported() && settings.dictation.enabled && settings.dictation.close_to_tray
 }
 
 /// Lock a mutex, recovering from poisoning (a panicked job must not brick the app).
@@ -187,7 +188,17 @@ pub fn run() {
     tauri::Builder::default()
         // First: a second launch hands over to the running Talkr (which shows its window) and
         // exits before it sets anything up.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // `talkr --dictate` toggles dictation in the running Talkr: bind it to a key where
+            // Talkr cannot listen for one itself (Wayland), or use it from scripts.
+            if args.iter().any(|a| a == DICTATE_ARG) {
+                if let Some(d) = app.try_state::<dictation::Dictation>() {
+                    d.toggle();
+                }
+            } else {
+                show_main_window(app);
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![STARTED_HIDDEN_ARG]),
@@ -256,6 +267,7 @@ pub fn run() {
             dictation_cancel,
             dictation_copy_last,
             dictation_warm_up,
+            dictation_request_permission,
         ])
         .on_window_event(|window, event| {
             // With dictation on, closing the window keeps Talkr in the tray so the shortcut
@@ -313,15 +325,18 @@ pub fn run() {
             })?;
 
             app.manage(dictation::Dictation::start(app.handle()));
-            #[cfg(windows)]
             if let Err(e) = tray::create(app.handle()) {
                 log::error!("could not create the tray icon: {}", e);
             }
             // Launched at login: stay in the tray. Otherwise show the window (it is created
             // hidden so a login start never flashes it).
             let started_hidden = std::env::args().any(|a| a == STARTED_HIDDEN_ARG);
-            if !(started_hidden && keeps_running_in_tray(app.handle())) {
+            let dictate_now = std::env::args().any(|a| a == DICTATE_ARG);
+            if !(started_hidden || dictate_now) || !keeps_running_in_tray(app.handle()) {
                 show_main_window(app.handle());
+            }
+            if dictate_now {
+                app.state::<dictation::Dictation>().toggle();
             }
             Ok(())
         })

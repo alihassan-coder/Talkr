@@ -27,7 +27,8 @@ tempfile = "3"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = ["tray-icon"] }
+# macos-private-api: transparent windows on macOS (the dictation pill).
+tauri = { version = "2.0", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-dialog = "2.0"
 # Dictation lives in the background: one instance only (a second one would install a second
 # keyboard hook and type everything twice), and optionally start with the system.

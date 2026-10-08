@@ -50,6 +50,14 @@ pub async fn dictation_copy_last(dictation: State<'_, Dictation>) -> Result<()> 
     Ok(())
 }
 
+/// Ask the system for what dictation still needs (Accessibility on macOS, the input portal on
+/// Wayland): shows the system prompt or opens its settings page.
+#[command]
+pub async fn dictation_request_permission(app: AppHandle) -> Result<()> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Dictation>().request_permission()).await?;
+    Ok(())
+}
+
 /// Load the dictation model now (the settings page calls this after a model change).
 #[command]
 pub async fn dictation_warm_up(app: AppHandle) -> Result<()> {

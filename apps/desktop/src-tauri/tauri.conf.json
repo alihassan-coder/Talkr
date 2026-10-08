@@ -23,6 +23,7 @@
         "backgroundColor": "#0b0b0c"
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": {
         "default-src": "'self'",

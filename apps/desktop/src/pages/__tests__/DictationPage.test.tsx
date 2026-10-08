@@ -9,6 +9,18 @@ import type { DictationSettings, DictationStatus, PartialSettings, Settings } fr
 
 const status = (patch: Partial<DictationStatus> = {}): DictationStatus => ({
   supported: true,
+  capabilities: {
+    os: 'windows',
+    supported: true,
+    holdToTalk: true,
+    modifierOnly: true,
+    recordsShortcut: true,
+    verifiesInsertion: true,
+    insertsText: true,
+    metaKey: 'Win',
+    note: null,
+  },
+  permission: { state: 'notNeeded' },
   active: false,
   error: null,
   modelId: 'whisper-small-en-q5',

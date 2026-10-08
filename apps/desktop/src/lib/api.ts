@@ -160,6 +160,8 @@ export const dictationStop = () => invoke<void>('dictation_stop')
 export const dictationCancel = () => invoke<void>('dictation_cancel')
 /** Copy the last dictation to the clipboard. */
 export const dictationCopyLast = () => invoke<void>('dictation_copy_last')
+/** Show the system prompt (or settings page) for what dictation still needs. */
+export const dictationRequestPermission = () => invoke<void>('dictation_request_permission')
 /** Load the dictation model now, so the next dictation does not wait for it. */
 export const dictationWarmUp = () => invoke<void>('dictation_warm_up')
 
