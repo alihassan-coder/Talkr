@@ -90,6 +90,9 @@ jobs:
       - name: Install the Vulkan SDK
         if: runner.os != 'macOS'
         uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
+        # Authenticated: anonymous GitHub API calls from shared runners hit the rate limit.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           cache: true
 

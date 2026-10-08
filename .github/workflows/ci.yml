@@ -244,6 +244,10 @@ jobs:
           sudo apt-get install -y cmake clang libclang-dev libasound2-dev libvulkan-dev mesa-vulkan-drivers
       - name: Install the Vulkan SDK (and lavapipe on Windows)
         uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
+        # The action looks up lavapipe's release on the GitHub API; anonymously, the runners'
+        # shared IP addresses hit the rate limit and the job fails before building anything.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           cache: true
           install_runtime: true
