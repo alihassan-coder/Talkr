@@ -349,7 +349,7 @@ app.run;
             } else {
                 // A dialog that appeared meanwhile is closed again; then the field is brought
                 // to the front (by activation, and through Accessibility where that is refused).
-                if let Some(d) = front.as_ref().filter(|t| dialog(*t)) {
+                if let Some(d) = front.as_ref().filter(|t| dialog(t)) {
                     if let Some(done) = ax::dismiss_dialog(d.pid) {
                         note(done);
                     }
