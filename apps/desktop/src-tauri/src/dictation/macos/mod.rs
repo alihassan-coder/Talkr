@@ -269,14 +269,29 @@ app.run;
             use std::io::Write;
             let _ = writeln!(std::io::stderr(), "real text field test: {text}");
         };
-        let front = Os::snapshot();
-        note(format!("frontmost before: {front:?}"));
-        if front.is_some_and(|t| t.bundle_id == "com.apple.AccessibilityUIServer") {
-            // A permission dialog left over from the runner's start keeps the focus: dismiss it.
-            let _ = std::process::Command::new("/usr/bin/killall").arg("AccessibilityUIServer").status();
+        // A system dialog left over from the runner's start (an Accessibility prompt) can hold
+        // the keyboard: close it, by its cancel button or else Escape.
+        let dialog = |t: &Target| t.bundle_id == "com.apple.AccessibilityUIServer";
+        for _ in 0..3 {
+            let Some(front) = Os::snapshot().filter(dialog) else { break };
+            note(format!("a dialog has focus: {front:?}"));
+            match ax::dismiss_dialog(front.pid) {
+                Some(done) => note(done),
+                None => {
+                    note("no button found; pressing Escape".into());
+                    // SAFETY: owned source and events, released when dropped.
+                    unsafe {
+                        let source = ffi::Cf::from_owned(ffi::CGEventSourceCreate(ffi::STATE_PRIVATE)).unwrap();
+                        for down in [true, false] {
+                            let event = ffi::Cf::from_owned(ffi::CGEventCreateKeyboardEvent(source.as_ptr(), 0x35, down)).unwrap();
+                            ffi::CGEventPost(ffi::HID_EVENT_TAP, event.as_ptr().cast_mut());
+                        }
+                    }
+                }
+            }
             std::thread::sleep(Duration::from_secs(1));
-            note(format!("after closing the Accessibility dialog: {:?}", Os::snapshot()));
         }
+        note(format!("frontmost before the test: {:?}", Os::snapshot()));
         let script = std::env::temp_dir().join("talkr-test-field.js");
         std::fs::write(&script, TEST_FIELD_APP).unwrap();
         let child = std::process::Command::new("/usr/bin/osascript").args(["-l", "JavaScript"]).arg(&script).spawn().unwrap();
@@ -301,7 +316,12 @@ app.run;
                 let running = workspace::is_running(&Target { pid, ..Target::default() });
                 note(format!("waiting: front {front:?}, focused {focused:?}, field app running: {running}"));
             }
-            assert!(started.elapsed() < Duration::from_secs(30), "the test field never got focus: front {front:?}, focused {focused:?}");
+            if started.elapsed() >= Duration::from_secs(30) {
+                // Only a system dialog that would not close may stand in the way.
+                assert!(front.as_ref().is_some_and(dialog), "the test field never got focus: front {front:?}, focused {focused:?}");
+                note("skipped: a system dialog keeps the keyboard".into());
+                return;
+            }
             std::thread::sleep(Duration::from_millis(250));
         };
         let value = || ax::inspect().and_then(|f| f.value).unwrap_or_default();

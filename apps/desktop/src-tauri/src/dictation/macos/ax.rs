@@ -176,6 +176,23 @@ pub fn raise(pid: i32) -> bool {
     unsafe { ffi::AXUIElementSetAttributeValue(app.as_ptr(), name.as_ptr(), ffi::kCFBooleanTrue) == AX_SUCCESS }
 }
 
+/// Close the dialog app `pid` shows by pressing its cancel (or default) button; returns what it
+/// pressed, for the log. For tests on CI runners, which can start with a system dialog in front.
+#[cfg(test)]
+pub fn dismiss_dialog(pid: i32) -> Option<String> {
+    // SAFETY: Create returns an owned element.
+    let app = unsafe { Cf::from_owned(ffi::AXUIElementCreateApplication(pid)) }?;
+    let window = attribute(&app, "AXFocusedWindow").or_else(|| attribute(&app, "AXMainWindow"))?;
+    let text = |element: &Cf, name: &str| attribute(element, name).and_then(|t| t.to_string_lossy()).unwrap_or_default();
+    let title = text(&window, "AXTitle");
+    let button = attribute(&window, "AXCancelButton").or_else(|| attribute(&window, "AXDefaultButton"))?;
+    let label = text(&button, "AXTitle");
+    let press = ffi::cf_string("AXPress")?;
+    // SAFETY: valid element and action name.
+    let error = unsafe { ffi::AXUIElementPerformAction(button.as_ptr(), press.as_ptr()) };
+    Some(format!("dialog {title:?}: pressed {label:?} (AX error {error})"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -151,6 +151,7 @@ extern "C" {
     pub fn AXUIElementIsAttributeSettable(element: CFTypeRef, attribute: CFStringRef, settable: *mut u8) -> AXError;
     pub fn AXUIElementSetAttributeValue(element: CFTypeRef, attribute: CFStringRef, value: CFTypeRef) -> AXError;
     pub fn AXUIElementSetMessagingTimeout(element: CFTypeRef, seconds: f32) -> AXError;
+    pub fn AXUIElementPerformAction(element: CFTypeRef, action: CFStringRef) -> AXError;
     pub fn AXUIElementGetPid(element: CFTypeRef, pid: *mut i32) -> AXError;
     pub fn AXValueCreate(kind: u32, value: *const c_void) -> CFTypeRef;
     pub fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> u8;
