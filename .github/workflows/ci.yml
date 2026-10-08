@@ -165,6 +165,44 @@ jobs:
           export PATH="$PWD/target/debug:$PATH"
           cargo test --workspace --locked
 
+  # Dictation's X11 backend against a real X server: Xvfb, with XTEST standing in for the user's
+  # keyboard and a test window for the app. Only the app's library is built; its build script
+  # wants the engine sidecar to exist, but these tests never run it, so a placeholder does.
+  x11-dictation:
+    name: Rust - X11 dictation under Xvfb (ubuntu-22.04)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Same version as apps/desktop/src-tauri/rust-toolchain.toml (scripts/check-versions.mjs).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: x11-dictation-v1
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libudev-dev libasound2-dev xvfb
+      - name: Placeholder engine sidecar and frontend folder
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          mkdir -p binaries ../dist
+          touch binaries/talkr-engine-x86_64-unknown-linux-gnu
+          chmod +x binaries/talkr-engine-x86_64-unknown-linux-gnu
+      - name: X11 integration tests
+        working-directory: apps/desktop/src-tauri
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" \
+            cargo test -p talkr --lib --locked dictation::linux::x11 -- --include-ignored --test-threads=1 --nocapture
+
   # The engine's GPU path only changes with the engine itself; nightly runs cover the rest.
   gpu-engine:
     name: Rust - Vulkan engine build and GPU tests (${{ matrix.os }}, software Vulkan)
