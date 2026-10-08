@@ -303,10 +303,18 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    /// Test runners are not allowed Accessibility: starting must fail at once with a message
-    /// that says what to do, never hang.
+    /// The listener's settings are global: tests that touch them take turns.
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    fn turn() -> std::sync::MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Without Accessibility, starting must fail at once with a message that says what to do,
+    /// never hang.
     #[test]
     fn without_permission_start_explains_and_does_not_hang() {
+        let _turn = turn();
         if ffi::trusted() {
             return;
         }
@@ -320,8 +328,44 @@ mod tests {
         assert!(!WANTED.load(Ordering::SeqCst), "the permission watcher gives up once stopped");
     }
 
+    /// A key event from an anonymous source (no marker), as the keyboard would send it.
+    fn press(code: u16, down: bool) {
+        // SAFETY: owned source and event, released when dropped; posting a live event.
+        unsafe {
+            let source = ffi::Cf::from_owned(ffi::CGEventSourceCreate(ffi::STATE_PRIVATE)).unwrap();
+            let event = ffi::Cf::from_owned(ffi::CGEventCreateKeyboardEvent(source.as_ptr(), code, down)).unwrap();
+            ffi::CGEventSetFlags(event.as_ptr().cast_mut(), 0);
+            ffi::CGEventPost(ffi::HID_EVENT_TAP, event.as_ptr().cast_mut());
+        }
+    }
+
+    /// The whole listener on a machine that allows it (a CI runner with Accessibility granted):
+    /// the tap starts on its run loop, hears a key press and release that went through the
+    /// system, and stops. F19 is used as the shortcut: it does nothing on its own.
+    #[test]
+    fn a_trusted_listener_hears_the_shortcut() {
+        let _turn = turn();
+        if std::env::var_os("CI").is_none() || !ffi::trusted() {
+            return;
+        }
+        let f19 = Shortcut { ctrl: false, shift: false, alt: false, win: false, key: Some(0x82), key_label: None };
+        let (tx, rx) = flume::unbounded();
+        configure(Some(&f19), None);
+        start(tx).expect("the listener starts");
+        assert!(is_running());
+        start(flume::unbounded().0).expect("starting again is harmless");
+        press(0x50, true);
+        press(0x50, false);
+        let events: Vec<HotkeyEvent> = (0..2).filter_map(|_| rx.recv_timeout(Duration::from_secs(3)).ok()).collect();
+        stop();
+        configure(None, None);
+        assert!(!is_running());
+        assert_eq!(events, vec![HotkeyEvent::DictateDown, HotkeyEvent::DictateUp]);
+    }
+
     #[test]
     fn shortcuts_reach_the_listener_through_atomics() {
+        let _turn = turn();
         configure(Some(&Shortcut::ctrl_win()), Some(&Shortcut::alt_shift_v()));
         let c = config();
         assert_eq!(c.dictate, Some(Chord { mods: CTRL | WIN, key: None }));

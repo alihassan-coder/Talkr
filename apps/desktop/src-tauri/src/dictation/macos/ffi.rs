@@ -306,7 +306,12 @@ mod tests {
     #[test]
     fn system_queries_answer() {
         // Whatever this machine allows, the queries answer without blocking.
-        let _ = trusted();
-        let _ = secure_input();
+        let (trusted, secure) = (trusted(), secure_input());
+        if std::env::var_os("CI").is_some() {
+            // Straight to stderr, past the test harness's capture: the log then shows which
+            // permission-dependent tests really ran.
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr(), "macOS test runner: Accessibility trusted = {trusted}, secure input = {secure}");
+        }
     }
 }

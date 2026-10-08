@@ -161,3 +161,27 @@ pub fn raise(pid: i32) -> bool {
     // SAFETY: valid element and name; kCFBooleanTrue is a constant.
     unsafe { ffi::AXUIElementSetAttributeValue(app.as_ptr(), name.as_ptr(), ffi::kCFBooleanTrue) == AX_SUCCESS }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Whatever has focus on this machine (and whether Accessibility is allowed), reading it
+    /// answers quickly and never crashes.
+    #[test]
+    fn reading_the_focused_field_never_hangs() {
+        let started = Instant::now();
+        let info = inspect();
+        if !ffi::trusted() {
+            assert_eq!(info, None, "nothing can be read without permission");
+        }
+        if let Some(target) = super::super::workspace::snapshot() {
+            let _ = focused_window_center(target.pid);
+            expose(target.pid);
+        }
+        assert_eq!(focused_window_center(0), None);
+        assert!(!raise(i32::MAX), "no such app");
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+}
