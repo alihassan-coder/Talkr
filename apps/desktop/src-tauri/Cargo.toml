@@ -87,6 +87,22 @@ windows = { version = "0.62", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+# ---- System-wide dictation on macOS (src/dictation/macos): event taps, Accessibility, the
+# pasteboard, the frontmost app. ----
+[target.'cfg(target_os = "macos")'.dependencies]
+
+
+# ---- System-wide dictation on Linux (src/dictation/linux). Each backend lists its own crates
+# under its heading; keep the headings apart so their changes merge cleanly. ----
+[target.'cfg(target_os = "linux")'.dependencies]
+# -- X11 backend (src/dictation/linux/x11) --
+
+
+
+# -- Wayland backend (src/dictation/linux/wayland) --
+
+
+
 [dev-dependencies]
 tempfile = { workspace = true }
 # An independent decoder that checks the FLAC exporter round-trips samples exactly.
