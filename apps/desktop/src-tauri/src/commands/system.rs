@@ -123,7 +123,6 @@ pub async fn update_settings(app: AppHandle, settings: PartialSettings) -> Resul
         drop(current);
         if dictation_changed {
             app.state::<crate::dictation::Dictation>().reconfigure();
-            #[cfg(windows)]
             crate::tray::sync(&app);
         }
         Ok(updated)

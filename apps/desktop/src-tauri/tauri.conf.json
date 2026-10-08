@@ -88,6 +88,7 @@
       "rpm": {
         "depends": [
           "webkit2gtk4.1",
+          "libayatana-appindicator-gtk3",
           "alsa-lib",
           "vulkan-loader",
           "gstreamer1-plugins-base",

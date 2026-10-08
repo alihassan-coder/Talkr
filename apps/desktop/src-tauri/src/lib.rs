@@ -112,11 +112,43 @@ const STARTED_HIDDEN_ARG: &str = "--hidden";
 /// Start a dictation, or finish the running one.
 const DICTATE_ARG: &str = "--dictate";
 
+/// How long the engine must sit unused before dictation loads its model again, after another
+/// model (from the Transcribe page, say) took its place.
+const REWARM_AFTER: Duration = Duration::from_secs(60);
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
+        reveal(&window);
+        return;
+    }
+    // The window should always exist (closing it either hides it or quits), but if it is gone a
+    // launch must still show something: build it again from the config. Off this thread: on
+    // Windows, building a webview from the event loop's own thread can deadlock.
+    log::warn!("the main window is gone; opening a new one");
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main").cloned() else { return };
+        match tauri::WebviewWindowBuilder::from_config(&app, &config).and_then(|b| b.build()) {
+            Ok(window) => reveal(&window),
+            Err(e) => log::error!("could not open the main window: {}", e),
+        }
+    });
+}
+
+fn reveal(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Close the window but keep Talkr running. Linux minimizes instead of hiding: many desktops
+/// (stock GNOME) show no tray icons, and a hidden window would leave no way back.
+fn put_away(window: &tauri::WebviewWindow) {
+    if cfg!(target_os = "linux") {
         let _ = window.show();
-        let _ = window.set_focus();
+        let _ = window.minimize();
+    } else {
+        let _ = window.hide();
     }
 }
 
@@ -124,7 +156,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 fn keeps_running_in_tray(app: &tauri::AppHandle) -> bool {
     let state = app.state::<AppState>();
     let settings = state.settings();
-    dictation::supported() && settings.dictation.enabled && settings.dictation.close_to_tray
+    tray::exists(app) && dictation::supported() && settings.dictation.enabled && settings.dictation.close_to_tray
 }
 
 /// Lock a mutex, recovering from poisoning (a panicked job must not brick the app).
@@ -273,11 +305,21 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             // With dictation on, closing the window keeps Talkr in the tray so the shortcut
-            // still works. Quit from the tray menu.
+            // still works. Quit from the tray menu. Otherwise closing it quits: the hidden pill
+            // window would keep Talkr running with no window, and a second launch would find
+            // nothing to show.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" && keeps_running_in_tray(window.app_handle()) {
+                if window.label() != "main" {
+                    return;
+                }
+                let app = window.app_handle();
+                if keeps_running_in_tray(app) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if let Some(window) = app.get_webview_window("main") {
+                        put_away(&window);
+                    }
+                } else {
+                    app.exit(0);
                 }
             }
         })
@@ -322,7 +364,15 @@ pub fn run() {
                 std::thread::sleep(Duration::from_secs(30));
                 let state = handle.state::<AppState>();
                 let resident = state.engine.resident_model();
-                if resident.is_some() && resident == dictation::warm_model(&state) {
+                let warm = dictation::warm_model(&state);
+                if resident.is_some() && resident == warm {
+                    continue;
+                }
+                // Dictation keeps its model loaded, but the engine holds another one or none (a
+                // warm-up that found the engine busy, another model used since): load it again
+                // once the engine has been left alone for a while.
+                if warm.is_some() && !state.engine.is_busy() && state.engine.idle_for() >= REWARM_AFTER {
+                    dictation::rewarm(&handle);
                     continue;
                 }
                 let idle = if resident.is_some() { ENGINE_IDLE } else { ENGINE_IDLE_NO_MODEL };
@@ -330,15 +380,17 @@ pub fn run() {
             })?;
 
             app.manage(dictation::Dictation::start(app.handle()));
-            if let Err(e) = tray::create(app.handle()) {
-                log::error!("could not create the tray icon: {}", e);
-            }
+            tray::create(app.handle());
             // Launched at login: stay in the tray. Otherwise show the window (it is created
             // hidden so a login start never flashes it).
             let started_hidden = std::env::args().any(|a| a == STARTED_HIDDEN_ARG);
             let dictate_now = std::env::args().any(|a| a == DICTATE_ARG);
             if !(started_hidden || dictate_now) || !keeps_running_in_tray(app.handle()) {
                 show_main_window(app.handle());
+            } else if cfg!(target_os = "linux") {
+                if let Some(window) = app.get_webview_window("main") {
+                    put_away(&window);
+                }
             }
             if dictate_now {
                 app.state::<dictation::Dictation>().toggle();
@@ -347,10 +399,12 @@ pub fn run() {
         })
         .build(context)
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                app.state::<AppState>().engine.shutdown();
-            }
+        .run(|app, event| match event {
+            tauri::RunEvent::Exit => app.state::<AppState>().engine.shutdown(),
+            // The Dock icon clicked while the window is closed to the tray.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main_window(app),
+            _ => {}
         });
 }
 

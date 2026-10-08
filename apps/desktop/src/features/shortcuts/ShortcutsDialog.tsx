@@ -1,9 +1,32 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { Kbd } from '@/components/ui'
-import { modKey } from '@/lib/platform'
+import { dictationStatus, isTauri } from '@/lib/api'
+import { isMac, modKey } from '@/lib/platform'
+import { keyPlatformOf } from '@/features/dictation/platform'
+import { altShiftV, ctrlWin, shortcutKeys, windowsKeys } from '@/features/dictation/shortcut'
+import type { KeyPlatform } from '@/features/dictation/shortcut'
 
-const groups = (mod: string) => [
+/** This system's key names until the backend says (it knows Linux from Windows). */
+const guessedPlatform = (): KeyPlatform => (isMac() ? { os: 'macos', metaKey: '⌘', modifierOnly: true } : windowsKeys)
+
+/** The dictation keys in the system's own names, from the backend's capabilities. */
+function useKeyPlatformOfSystem(): KeyPlatform {
+  const [platform, setPlatform] = useState(guessedPlatform)
+  useEffect(() => {
+    if (!isTauri()) return
+    let alive = true
+    dictationStatus()
+      .then((s) => alive && setPlatform(keyPlatformOf(s.capabilities)))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+  return platform
+}
+
+const groups = (mod: string, keys: KeyPlatform) => [
   {
     title: 'Go to',
     items: [
@@ -25,9 +48,9 @@ const groups = (mod: string) => [
   {
     title: 'Dictation, in any app (defaults; change them in Dictation)',
     items: [
-      { keys: ['Ctrl', 'Win'], label: 'Hold to dictate, tap for hands-free' },
+      { keys: shortcutKeys(ctrlWin, keys), label: 'Hold to dictate, tap for hands-free' },
       { keys: ['Esc'], label: 'Cancel a dictation' },
-      { keys: ['Alt', 'Shift', 'V'], label: 'Paste the last dictation again' },
+      { keys: shortcutKeys(altShiftV, keys), label: 'Paste the last dictation again' },
     ],
   },
   {
@@ -53,6 +76,7 @@ const groups = (mod: string) => [
 /** Keyboard shortcut overview, opened with "?". */
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const keys = useKeyPlatformOfSystem()
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
@@ -95,7 +119,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className="space-y-4">
-          {groups(modKey()).map((group) => (
+          {groups(modKey(), keys).map((group) => (
             <section key={group.title}>
               <h3 className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-subtle">{group.title}</h3>
               <ul className="space-y-1">

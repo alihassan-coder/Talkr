@@ -90,6 +90,37 @@ const lastDictation = (b: ReturnType<typeof backend>) =>
   (b.argsOf('update_settings').at(-1)!.settings as PartialSettings).dictation!
 
 describe('DictationPage', () => {
+  it('waits for the real status before showing the page, and offers a retry when it fails', async () => {
+    const user = userEvent.setup()
+    let fail = true
+    backend({
+      extra: {
+        dictation_status: () => (fail ? Promise.reject('The engine is not answering') : status({ capabilities: caps({ os: 'macos', metaKey: '⌘' }) })),
+      },
+    })
+    render(
+      <MemoryRouter>
+        <DictationPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('The engine is not answering')).toBeInTheDocument()
+    // Never the Windows keys on another system while the status is missing.
+    expect(screen.queryByLabelText('Ctrl plus Win')).toBeNull()
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByRole('heading', { name: 'Dictate anywhere' })
+    expect(screen.getAllByLabelText('Control plus Command').length).toBeGreaterThan(0)
+  })
+
+  it('follows a listener that comes up later, without a click', async () => {
+    let up = false
+    const b = backend({ dictation: { enabled: true }, status: () => status({ active: up, error: up ? null : 'Needs permission' }) })
+    await renderPage()
+    const before = b.count('dictation_status')
+    up = true
+    await waitFor(() => expect(b.count('dictation_status')).toBeGreaterThan(before), { timeout: 5000 })
+  })
+
   it('turns dictation on and saves the whole dictation object', async () => {
     const user = userEvent.setup()
     const b = backend()
@@ -116,7 +147,7 @@ describe('DictationPage', () => {
     await renderPage()
     await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
     expect(screen.getByText('Press the new shortcut…')).toBeInTheDocument()
-    await waitFor(() => expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true }]))
+    await waitFor(() => expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true, generation: expect.any(Number) }]))
     await flush()
     await emitEvent('dictation://captured', { ctrl: true, shift: false, alt: true, win: false, key: 32, keyLabel: 'Space' })
     await waitFor(() => expect(b.count('update_settings')).toBe(1))
@@ -330,9 +361,12 @@ describe('DictationPage', () => {
     const b = backend({ dictation: { enabled: true } })
     await renderPage()
     await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))
-    await waitFor(() => expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true }]))
+    await waitFor(() => expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true, generation: expect.any(Number) }]))
     await user.click(screen.getByRole('button', { name: 'Stop recording dictation shortcut' }))
-    expect(b.argsOf('dictation_capture_shortcut')).toEqual([{ active: true }, { active: false }])
+    const calls = b.argsOf('dictation_capture_shortcut') as { active: boolean; generation: number }[]
+    expect(calls.map((c) => c.active)).toEqual([true, false])
+    // Numbered, so the backend can drop a start that arrives after its stop.
+    expect(calls[1]!.generation).toBeGreaterThan(calls[0]!.generation)
     expect(screen.queryByText('Press the new shortcut…')).toBeNull()
     // Escape in the hook arrives as null: back to the shortcut, no error.
     await user.click(screen.getByRole('button', { name: 'Change dictation shortcut' }))

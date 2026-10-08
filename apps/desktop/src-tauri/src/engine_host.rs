@@ -685,6 +685,11 @@ impl EngineHost {
         false
     }
 
+    /// How long since a job last used the engine.
+    pub fn idle_for(&self) -> Duration {
+        lock(&self.last_used).elapsed()
+    }
+
     /// Stop the engine if nothing has used it for `idle`. Returns whether it was stopped.
     pub fn stop_if_idle(&self, idle: Duration) -> bool {
         // Decided under the worker lock: a job counts itself in under it too (`enter`).

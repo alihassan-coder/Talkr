@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Pill } from '@/overlay/Pill'
+import { isPillUp } from '@/overlay/state'
+import { followTheme } from '@/overlay/theme'
 import { isTauri } from '@/lib/api'
 import '@/overlay/overlay.css'
 
@@ -25,7 +27,20 @@ if (isTauri() || !import.meta.env.DEV) {
   )
 }
 
-// Follow theme changes made in the main window (same origin, so the same storage).
+// Follow theme changes made in the main window (same origin, so the same storage). The key is
+// stores/ui.ts's UI_STORAGE_KEY, not imported: that would set up the whole store here.
+const UI_STORAGE_KEY = 'talkr.ui'
+const theme = followTheme({
+  read: () => {
+    try {
+      return localStorage.getItem(UI_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  },
+  busy: isPillUp,
+  reload: () => window.location.reload(),
+})
 window.addEventListener('storage', (e) => {
-  if (e.key === 'talkr.ui') window.location.reload()
+  if (e.key === UI_STORAGE_KEY) theme.changed()
 })

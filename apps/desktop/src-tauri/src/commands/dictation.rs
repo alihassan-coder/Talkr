@@ -22,9 +22,11 @@ pub async fn list_microphones() -> Result<Vec<InputDevice>> {
 
 /// Start (or stop) recording a new shortcut: the next key combination pressed anywhere is
 /// reported through `dictation://captured` instead of reaching apps. Escape cancels.
+/// `generation` numbers the page's requests (rising): async commands may run out of order, and a
+/// start that arrives after its cancel must not leave the keyboard swallowed.
 #[command]
-pub async fn dictation_capture_shortcut(dictation: State<'_, Dictation>, active: bool) -> Result<()> {
-    dictation.capture(active);
+pub async fn dictation_capture_shortcut(dictation: State<'_, Dictation>, active: bool, generation: Option<u64>) -> Result<()> {
+    dictation.capture(active, generation);
     Ok(())
 }
 

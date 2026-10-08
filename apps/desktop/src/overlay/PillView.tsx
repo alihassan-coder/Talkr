@@ -5,6 +5,9 @@ import { WAVE, WaveMotion, wavePath, waveWidth } from '@/overlay/wave'
 import { announce } from '@/overlay/state'
 import type { PillState } from '@/overlay/state'
 
+/** How long after hiding the pill lets go of its content: longer than its exit animation. */
+export const PILL_SETTLE_MS = 700
+
 const prefersCalm = () =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -189,6 +192,13 @@ export function PillView({
   // The last visible state, kept while the pill fades out so its content does not vanish first.
   const [shown, setShown] = useState<PillState>(state)
   if (state.kind !== 'hidden' && state !== shown) setShown(state)
+  // Once faded out, drop it: the waveform's animation loop and the timer must not keep running
+  // in a window that is hidden (Windows hides it without telling the webview).
+  useEffect(() => {
+    if (state.kind !== 'hidden' || shown.kind === 'hidden') return
+    const t = setTimeout(() => setShown({ kind: 'hidden' }), PILL_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [state, shown])
 
   const pill = useRef<HTMLDivElement>(null)
   const measure = (body: HTMLDivElement | null) => {

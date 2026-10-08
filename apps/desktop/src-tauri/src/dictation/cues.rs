@@ -100,42 +100,92 @@ pub fn play(cue: Cue) {
 
 fn play_blocking(cue: Cue) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let source = samples(cue);
+    use cpal::SampleFormat;
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or("no output device")?;
     let config = device.default_output_config().map_err(|e| e.to_string())?;
-    let channels = config.channels() as usize;
     let rate = config.sample_rate();
-    if config.sample_format() != cpal::SampleFormat::F32 {
-        return Err(format!("unsupported output format {:?}", config.sample_format()));
-    }
-    // Nearest-neighbour resampling is plenty for a 100 ms chime.
-    let step = RATE as f64 / rate.max(1) as f64;
-    let total = (source.len() as f64 / step) as usize;
-    let mut position = 0usize;
+    let format = config.sample_format();
+    let config: cpal::StreamConfig = config.into();
+    let source = Chime::new(samples(cue), rate);
     let (done_tx, done_rx) = flume::bounded::<()>(1);
-    let stream = device
-        .build_output_stream(
-            config.into(),
-            move |out: &mut [f32], _| {
-                for frame in out.chunks_mut(channels.max(1)) {
-                    let value = if position < total { source[((position as f64) * step) as usize % source.len()] } else { 0.0 };
-                    frame.fill(value);
-                    position += 1;
-                }
-                if position >= total {
-                    let _ = done_tx.try_send(());
-                }
-            },
-            |e| log::debug!("cue output error: {}", e),
-            None,
-        )
-        .map_err(|e| e.to_string())?;
+    // The formats output devices use in practice (the recorder takes more for microphones).
+    let stream = match format {
+        SampleFormat::F32 => build_output::<f32>(&device, config, source, done_tx),
+        SampleFormat::I16 => build_output::<i16>(&device, config, source, done_tx),
+        SampleFormat::U16 => build_output::<u16>(&device, config, source, done_tx),
+        SampleFormat::I32 => build_output::<i32>(&device, config, source, done_tx),
+        other => return Err(format!("unsupported output format {:?}", other)),
+    }?;
     stream.play().map_err(|e| e.to_string())?;
     let _ = done_rx.recv_timeout(std::time::Duration::from_millis(800));
     // Let the device drain the last buffer.
     std::thread::sleep(std::time::Duration::from_millis(60));
     Ok(())
+}
+
+/// A cue resampled on the fly to the device's rate. Nearest-neighbour is plenty for a 100 ms
+/// chime.
+struct Chime {
+    source: &'static [f32],
+    step: f64,
+    total: usize,
+    position: usize,
+}
+
+impl Chime {
+    fn new(source: &'static [f32], device_rate: u32) -> Self {
+        let step = RATE as f64 / device_rate.max(1) as f64;
+        Self { source, step, total: (source.len() as f64 / step) as usize, position: 0 }
+    }
+
+    /// The next frame's value; silence once the chime is over.
+    fn next_value(&mut self) -> f32 {
+        let value = if self.position < self.total && !self.source.is_empty() {
+            self.source[((self.position as f64) * self.step) as usize % self.source.len()]
+        } else {
+            0.0
+        };
+        self.position += 1;
+        value
+    }
+
+    fn finished(&self) -> bool {
+        self.position >= self.total
+    }
+
+    /// Fill an interleaved buffer, the same value on every channel.
+    fn fill<T: cpal::FromSample<f32> + Copy>(&mut self, out: &mut [T], channels: usize) {
+        for frame in out.chunks_mut(channels.max(1)) {
+            frame.fill(T::from_sample_(self.next_value()));
+        }
+    }
+}
+
+fn build_output<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    mut chime: Chime,
+    done: flume::Sender<()>,
+) -> Result<cpal::Stream, String>
+where
+    T: cpal::SizedSample + cpal::FromSample<f32> + Send + 'static,
+{
+    use cpal::traits::DeviceTrait;
+    let channels = config.channels as usize;
+    device
+        .build_output_stream(
+            config,
+            move |out: &mut [T], _| {
+                chime.fill(out, channels);
+                if chime.finished() {
+                    let _ = done.try_send(());
+                }
+            },
+            |e| log::debug!("cue output error: {}", e),
+            None,
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -152,5 +202,32 @@ mod tests {
             assert_eq!(reader.spec().sample_rate, RATE);
             assert_eq!(reader.duration() as usize, s.len());
         }
+    }
+
+    #[test]
+    fn chime_converts_to_integer_outputs() {
+        let source: &'static [f32] = Box::leak(vec![0.5f32, -0.5].into_boxed_slice());
+        let mut chime = Chime::new(source, RATE);
+        let mut out = [0i16; 6];
+        chime.fill(&mut out, 2);
+        assert_eq!(out[0], out[1], "every channel gets the same value");
+        assert!(out[0] > 16_000 && out[2] < -16_000, "{out:?}");
+        assert_eq!(out[4], 0, "silence after the end");
+        assert!(chime.finished());
+
+        let mut chime = Chime::new(source, RATE);
+        let mut out = [0u16; 2];
+        chime.fill(&mut out, 1);
+        assert!(out[0] > 32_768 + 16_000 && out[1] < 32_768 - 16_000, "{out:?}");
+
+        let mut chime = Chime::new(source, RATE);
+        let mut out = [0i32; 1];
+        chime.fill(&mut out, 1);
+        assert!(out[0] > i32::MAX / 3, "{out:?}");
+    }
+
+    #[test]
+    fn chime_resamples_to_the_device_rate() {
+        assert_eq!(Chime::new(samples(Cue::Start), RATE * 2).total, samples(Cue::Start).len() * 2);
     }
 }
