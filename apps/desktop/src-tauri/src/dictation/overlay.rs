@@ -68,6 +68,13 @@ pub struct Overlay {
     /// Held while a state is decided and sent, so "show this unless something newer is up" and
     /// delayed hides cannot interleave with a new dictation's pill.
     gate: Arc<Mutex<()>>,
+    /// The window is on screen (shown and not hidden since).
+    visible: Arc<AtomicBool>,
+    /// The window has been shown at least once.
+    shown_once: Arc<AtomicBool>,
+    /// Whether the pill should take clicks; applied once the window can take it (see
+    /// [`set_interactive`](Self::set_interactive)).
+    interactive: Arc<AtomicBool>,
 }
 
 impl Overlay {
@@ -89,8 +96,19 @@ impl Overlay {
             .visible(false);
         // macOS needs the private-API feature for transparent windows (enabled in Cargo.toml).
         let window = builder.transparent(true).build()?;
-        window.set_ignore_cursor_events(true)?;
-        Ok(Self { app: app.clone(), generation: Arc::new(AtomicU64::new(0)), gate: Arc::new(Mutex::new(())) })
+        // On Linux, changing a window that has never been shown can panic (tao unwraps the GDK
+        // window, which does not exist yet): click-through is applied after the first show.
+        if !cfg!(target_os = "linux") {
+            window.set_ignore_cursor_events(true)?;
+        }
+        Ok(Self {
+            app: app.clone(),
+            generation: Arc::new(AtomicU64::new(0)),
+            gate: Arc::new(Mutex::new(())),
+            visible: Arc::new(AtomicBool::new(false)),
+            shown_once: Arc::new(AtomicBool::new(false)),
+            interactive: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub fn window(&self) -> Option<tauri::WebviewWindow> {
@@ -114,10 +132,27 @@ impl Overlay {
     }
 
     /// Show `state` unless `busy` is set (a newer dictation owns the pill), deciding and showing
-    /// in one step.
-    pub fn set_unless(&self, busy: &AtomicBool, state: State) -> Option<u64> {
+    /// in one step; and bring the window up if it is hidden (notices that follow no dictation:
+    /// copy-last, paste-again).
+    pub fn set_and_show_unless(&self, busy: &AtomicBool, state: State, position: OverlayPosition) -> Option<u64> {
         let _gate = self.gate();
-        (!busy.load(Ordering::SeqCst)).then(|| self.emit(state))
+        if busy.load(Ordering::SeqCst) {
+            return None;
+        }
+        let visible = !matches!(state, State::Hidden);
+        let generation = self.emit(state);
+        if visible && !self.visible.load(Ordering::SeqCst) {
+            self.show_window(None, position);
+        }
+        Some(generation)
+    }
+
+    /// Take the pill for a dictation: set `owned` (so the worker's later states give way) and
+    /// show `state`, in one step.
+    pub fn claim(&self, owned: &AtomicBool, state: State) -> u64 {
+        let _gate = self.gate();
+        owned.store(true, Ordering::SeqCst);
+        self.emit(state)
     }
 
     pub fn level(&self, session: u64, level: f32) {
@@ -131,13 +166,26 @@ impl Overlay {
 
     /// Show the window near `anchor` (the target), without taking focus.
     pub fn show(&self, anchor: Option<&Target>, position: OverlayPosition) {
+        let _gate = self.gate();
+        self.show_window(anchor, position);
+    }
+
+    fn show_window(&self, anchor: Option<&Target>, position: OverlayPosition) {
         if let Some(window) = self.window() {
             Os::show_overlay(&window, anchor, SIZE, position);
+            self.visible.store(true, Ordering::SeqCst);
+            if !self.shown_once.swap(true, Ordering::SeqCst) && cfg!(target_os = "linux") {
+                let _ = window.set_ignore_cursor_events(!self.interactive.load(Ordering::SeqCst));
+            }
         }
     }
 
     /// Clickable while the pill shows buttons (hands-free), click-through otherwise.
     pub fn set_interactive(&self, interactive: bool) {
+        self.interactive.store(interactive, Ordering::SeqCst);
+        if !applies_now(self.shown_once.load(Ordering::SeqCst)) {
+            return;
+        }
         if let Some(window) = self.window() {
             let _ = window.set_ignore_cursor_events(!interactive);
         }
@@ -162,6 +210,7 @@ impl Overlay {
                 this.set_interactive(false);
                 if let Some(window) = this.window() {
                     Os::hide_overlay(&window);
+                    this.visible.store(false, Ordering::SeqCst);
                 }
             }
         });
@@ -171,6 +220,12 @@ impl Overlay {
     pub fn hide_latest_after(&self, delay: Duration) {
         self.hide_after(self.generation.load(Ordering::SeqCst), delay);
     }
+}
+
+/// Whether window changes can be made now: on Linux only once the window has been shown (see
+/// [`Overlay::create`]).
+fn applies_now(shown_once: bool) -> bool {
+    shown_once || !cfg!(target_os = "linux")
 }
 
 /// Place and show the overlay with Tauri's own window calls: centred on the monitor with the
@@ -217,5 +272,11 @@ mod tests {
         .unwrap();
         assert_eq!(json, r#"{"kind":"notice","session":1,"tone":"warn","title":"Copied","detail":null}"#);
         assert_eq!(serde_json::to_string(&State::Hidden).unwrap(), r#"{"kind":"hidden"}"#);
+    }
+
+    #[test]
+    fn click_through_waits_for_the_first_show_on_linux() {
+        assert!(applies_now(true));
+        assert_eq!(applies_now(false), !cfg!(target_os = "linux"));
     }
 }

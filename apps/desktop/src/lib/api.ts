@@ -155,7 +155,14 @@ export const dictationStatus = () => invoke<DictationStatus>('dictation_status')
 /** Connected microphones, the system default first. */
 export const listMicrophones = () => invoke<Microphone[]>('list_microphones')
 /** Record the next key combination pressed anywhere; it arrives through `onShortcutCaptured`. */
-export const captureShortcut = (args: { active: boolean }) => invoke<void>('dictation_capture_shortcut', args)
+/**
+ * Requests to start or stop recording a shortcut, numbered so the backend applies them in the
+ * order they were made (commands can arrive out of order; a start landing after its stop would
+ * leave the keyboard swallowed). Seeded from the clock so a reloaded page keeps counting up.
+ */
+let captureGeneration = Date.now()
+export const captureShortcut = (args: { active: boolean }) =>
+  invoke<void>('dictation_capture_shortcut', { ...args, generation: ++captureGeneration })
 export const dictationStop = () => invoke<void>('dictation_stop')
 export const dictationCancel = () => invoke<void>('dictation_cancel')
 /** Copy the last dictation to the clipboard. */

@@ -17,7 +17,29 @@ fn show_main(app: &AppHandle) {
     crate::show_main_window(app);
 }
 
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+/// Create the tray icon, and say whether there is one. Never fails the app: on Linux the
+/// indicator library is loaded at run time, and libappindicator-sys panics (rather than returning
+/// an error) when none is installed.
+pub fn create(app: &AppHandle) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(app))) {
+        Ok(Ok(())) => true,
+        Ok(Err(e)) => {
+            log::error!("could not create the tray icon: {}", e);
+            false
+        }
+        Err(_) => {
+            log::error!("could not create the tray icon (on Linux, install libayatana-appindicator)");
+            false
+        }
+    }
+}
+
+/// Whether Talkr has a tray icon to come back from (see [`create`]).
+pub fn exists(app: &AppHandle) -> bool {
+    app.try_state::<Tray>().is_some()
+}
+
+fn build(app: &AppHandle) -> tauri::Result<()> {
     let enabled = app.state::<AppState>().settings().dictation.enabled;
     let open = MenuItem::with_id(app, "open", "Open Talkr", true, None::<&str>)?;
     let dictation = CheckMenuItem::with_id(app, "dictation", "Dictation", true, enabled, None::<&str>)?;

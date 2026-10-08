@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { act } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 import { Pill } from '@/overlay/Pill'
-import { PillView } from '@/overlay/PillView'
+import { PILL_SETTLE_MS, PillView } from '@/overlay/PillView'
 import { mockBackend } from '@/test/tauri'
 
 describe('dictation pill', () => {
@@ -55,6 +56,25 @@ describe('dictation pill', () => {
     rerender(<PillView state={{ kind: 'hidden' }} level={level} onStop={noop} onCancel={noop} />)
     expect(container.querySelector('.pill')).toHaveAttribute('data-visible', 'false')
     expect(screen.getByText('Hi')).toBeInTheDocument()
+  })
+
+  it('stops its waveform and timer once it has faded out', () => {
+    vi.useFakeTimers()
+    try {
+      const level = { current: 0 }
+      const noop = () => {}
+      const { container, rerender } = render(
+        <PillView state={{ kind: 'listening', session: 1, locked: false, app: null }} level={level} onStop={noop} onCancel={noop} />,
+      )
+      expect(container.querySelector('.pill-wave')).not.toBeNull()
+      rerender(<PillView state={{ kind: 'hidden' }} level={level} onStop={noop} onCancel={noop} />)
+      expect(container.querySelector('.pill-wave')).not.toBeNull()
+      act(() => vi.advanceTimersByTime(PILL_SETTLE_MS))
+      expect(container.querySelector('.pill-wave')).toBeNull()
+      expect(container.querySelector('.pill-timer')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('picks an icon that says what happened', () => {

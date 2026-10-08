@@ -5078,6 +5078,8 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+ "wayland-client",
+ "wayland-protocols-wlr",
  "windows",
  "wl-clipboard-rs",
  "x11rb",

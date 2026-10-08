@@ -1,9 +1,15 @@
 //! Keyboard access on Wayland: a RemoteDesktop portal session with a keyboard, which the user
 //! allows once. Talkr keeps it open while dictation is on (the desktop may show that an app can
 //! control the keyboard) and stores the portal's restore token, so later starts do not ask again.
+//! Only turning dictation on, dictating and the settings page's Allow open the session; asking
+//! whether access is allowed never does.
 //!
 //! The session also carries the Clipboard portal where the desktop has it (GNOME, which has no
 //! data-control protocol): Talkr offers the selection and writes it out when an app pastes.
+//! While Talkr owns the clipboard (the user's clipboard, put back after a paste), only this
+//! session can serve it, so turning dictation off keeps the session until another app takes the
+//! clipboard (it is not used for typing meanwhile). Quitting Talkr loses that clipboard, as it
+//! would for any Wayland app that owns it, unless a clipboard manager kept a copy.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,13 +21,19 @@ use ashpd::desktop::remote_desktop::{DeviceType, KeyState, RemoteDesktop, Select
 use ashpd::desktop::{PersistMode, ResponseError, Session};
 use ashpd::enumflags2::BitFlags;
 use futures_util::StreamExt;
-use super::clipboard::{read_capped, worth_saving, Contents, MAX_SAVED_BYTES, READ_TIMEOUT, TEXT_TYPES};
-use super::keysym::{held_after, Stroke};
+use tokio::sync::mpsc;
+use super::clipboard::{read_capped, worth_saving, Contents, MAX_SAVED_BYTES, READ_TIMEOUT, SENSITIVE_HINT, TEXT_TYPES};
+use super::keysym::{maybe_held, Stroke};
 use super::portal::{self, describe, lock};
 
 /// Typing pauses briefly after this many key events, so slow apps keep up.
 const PACE_EVERY: usize = 48;
 const PACE: Duration = Duration::from_millis(3);
+/// One key event the desktop has not answered after this long: it stopped answering.
+const KEY_STALL: Duration = Duration::from_secs(2);
+
+/// Who owns the clipboard, as the desktop announces it: Talkr's session, and the types offered.
+type OwnerChange = (bool, Vec<String>);
 
 pub struct Remote {
     id: u64,
@@ -32,19 +44,29 @@ pub struct Remote {
     /// What Talkr offers while it owns the selection.
     offer: Mutex<Option<Arc<Contents>>>,
     owns_selection: AtomicBool,
-    /// The MIME types of the selection another app owns, as last announced.
+    /// The MIME types of the selection another app owns, as last announced; `None` until the
+    /// desktop said.
     foreign_types: Mutex<Option<Vec<String>>>,
+    /// Owner changes, followed since before the session started (taken by `watch`).
+    owners: Mutex<Option<mpsc::UnboundedReceiver<OwnerChange>>>,
     /// Pastes of Talkr's selection served so far.
     transfers: AtomicU64,
     /// Talkr closed the session: stop watching it.
     ended: tokio::sync::Notify,
 }
 
-/// Typing stopped: how many key events went through, and why.
+/// Typing stopped: how many key events surely went through, how many may have, and why.
 #[derive(Debug)]
 pub struct Stopped {
     pub sent: usize,
+    pub attempted: usize,
     pub error: String,
+}
+
+/// How long `count` key events may take in all. Each one is a D-Bus round trip, a few ms on a
+/// busy desktop; a stall is caught per key (`KEY_STALL`), so this is only a backstop.
+fn budget(count: usize) -> Duration {
+    Duration::from_secs(5) + Duration::from_millis(25 * count as u64)
 }
 
 impl Remote {
@@ -60,18 +82,24 @@ impl Remote {
         self.transfers.load(Ordering::SeqCst)
     }
 
-    /// Send key events, in order. On a failure the keys still down are released.
+    /// Send key events, in order. On a failure every key that may still be down is released.
     pub fn send(self: &Arc<Self>, strokes: &[Stroke]) -> Result<(), Stopped> {
         if strokes.is_empty() {
             return Ok(());
         }
-        let sent = Arc::new(AtomicUsize::new(0));
-        let timeout = Duration::from_secs(3) + Duration::from_millis(4) * strokes.len() as u32;
-        let (me, list, counter) = (self.clone(), strokes.to_vec(), sent.clone());
-        let result = portal::block(timeout, async move {
+        // Counted before each call (it may reach the desktop even if it never returns) and after.
+        let attempted = Arc::new(AtomicUsize::new(0));
+        let confirmed = Arc::new(AtomicUsize::new(0));
+        let (me, list, tried, done) = (self.clone(), strokes.to_vec(), attempted.clone(), confirmed.clone());
+        let result = portal::block(budget(strokes.len()), async move {
             for (i, &(keysym, down)) in list.iter().enumerate() {
-                me.key(keysym, down).await?;
-                counter.fetch_add(1, Ordering::SeqCst);
+                tried.store(i + 1, Ordering::SeqCst);
+                match tokio::time::timeout(KEY_STALL, me.key(keysym, down)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err("the desktop stopped answering".to_string()),
+                }
+                done.store(i + 1, Ordering::SeqCst);
                 if i % PACE_EVERY == PACE_EVERY - 1 {
                     tokio::time::sleep(PACE).await;
                 }
@@ -83,8 +111,8 @@ impl Remote {
             Some(Err(e)) => e,
             None => "the desktop did not answer in time".to_string(),
         };
-        let sent = sent.load(Ordering::SeqCst);
-        let stuck = held_after(strokes, sent);
+        let (sent, attempted) = (confirmed.load(Ordering::SeqCst), attempted.load(Ordering::SeqCst));
+        let stuck = maybe_held(strokes, sent, attempted);
         if !stuck.is_empty() {
             let me = self.clone();
             portal::block(Duration::from_secs(1), async move {
@@ -93,7 +121,7 @@ impl Remote {
                 }
             });
         }
-        Err(Stopped { sent, error })
+        Err(Stopped { sent, attempted, error })
     }
 
     async fn key(&self, keysym: u32, down: bool) -> Result<(), String> {
@@ -135,15 +163,14 @@ impl Remote {
     }
 
     /// The clipboard as it is now, every type, to put back later. `None` when it cannot be read
-    /// completely.
+    /// completely, or the desktop has not said what it holds (reading only the text could drop
+    /// an image or rich text, which putting it back would then lose).
     pub fn read_selection(self: &Arc<Self>) -> Option<Contents> {
         self.clipboard.as_ref()?;
         if self.owns_selection() {
             return lock(&self.offer).as_ref().map(|o| o.as_slice().to_vec());
         }
-        // Not announced yet: only plain text can be asked for blindly, and if that fails the
-        // clipboard may hold something else that would be lost.
-        let types = lock(&self.foreign_types).clone().unwrap_or_else(|| vec![TEXT_TYPES[0].to_string()]);
+        let types = lock(&self.foreign_types).clone()?;
         let types: Vec<String> = types.into_iter().filter(|t| worth_saving(t)).collect();
         if types.is_empty() {
             return Some(Vec::new());
@@ -190,7 +217,8 @@ impl Remote {
             None => false,
         };
         let _ = clipboard.selection_write_done(&self.session, serial, written).await;
-        if written {
+        // A clipboard manager checking the hint is not a paste.
+        if written && mime != SENSITIVE_HINT {
             self.transfers.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -211,19 +239,47 @@ fn pick(offer: &Contents, mime: &str) -> Option<usize> {
 
 struct Slot {
     active: Option<Arc<Remote>>,
+    /// Closed while it owned the clipboard: kept only to serve it (see the module docs).
+    lingering: Option<Arc<Remote>>,
     starting: bool,
+    /// Keyboard access is wanted (dictation is on, or the user asked): a session that opens after
+    /// `close` is closed again at once.
+    wanted: bool,
     /// A silent restore failed: wait for the user to ask before trying again.
     restore_failed: bool,
     error: Option<String>,
     next_id: u64,
 }
 
-static SLOT: Mutex<Slot> = Mutex::new(Slot { active: None, starting: false, restore_failed: false, error: None, next_id: 1 });
+impl Slot {
+    const fn new() -> Self {
+        Slot { active: None, lingering: None, starting: false, wanted: false, restore_failed: false, error: None, next_id: 1 }
+    }
+
+    /// The user allowed access: a session is open, or a token from before is expected to
+    /// restore (and has not failed to). `token` is only looked at when needed.
+    fn allowed(&self, token: impl FnOnce() -> bool) -> bool {
+        self.active.is_some() || (!self.restore_failed && token())
+    }
+
+    /// A session that just opened is kept: nobody closed keyboard access since it was asked for
+    /// (or it was asked for again after that).
+    fn keeps_opened(&self) -> bool {
+        self.wanted
+    }
+}
+
+static SLOT: Mutex<Slot> = Mutex::new(Slot::new());
 static CHANGED: Condvar = Condvar::new();
 
 /// The running session, if keyboard access was allowed.
 pub fn active() -> Option<Arc<Remote>> {
     lock(&SLOT).active.clone()
+}
+
+/// Whether keyboard access is allowed, without opening anything (for the settings page).
+pub fn allowed() -> bool {
+    lock(&SLOT).allowed(|| load_token().is_some())
 }
 
 /// Why the last attempt failed, if it did.
@@ -236,10 +292,15 @@ pub fn last_error() -> Option<String> {
 pub fn ensure(interactive: bool, wait: Duration) -> Option<Arc<Remote>> {
     let deadline = Instant::now() + wait;
     let mut slot = lock(&SLOT);
+    slot.wanted = true;
     let mut started = false;
     loop {
         if let Some(remote) = &slot.active {
             return Some(remote.clone());
+        }
+        if let Some(remote) = slot.lingering.take() {
+            slot.active = Some(remote.clone());
+            return Some(remote);
         }
         if !slot.starting {
             // Our own attempt ended without a session. (One that was already running, a silent
@@ -269,9 +330,20 @@ pub fn ensure(interactive: bool, wait: Duration) -> Option<Arc<Remote>> {
     }
 }
 
-/// End the session (dictation was turned off). The restore token stays.
+/// End the session (dictation was turned off), including one still opening. The restore token
+/// stays. A session that owns the clipboard stays until another app takes it.
 pub fn close() {
-    let Some(remote) = lock(&SLOT).active.take() else { return };
+    let remote = {
+        let mut slot = lock(&SLOT);
+        slot.wanted = false;
+        let Some(remote) = slot.active.take() else { return };
+        if remote.owns_selection() {
+            log::info!("dictation: keeping the clipboard Talkr holds until another app takes it");
+            slot.lingering = Some(remote);
+            return;
+        }
+        remote
+    };
     CHANGED.notify_all();
     remote.ended.notify_one();
     portal::block(Duration::from_secs(2), async move {
@@ -287,33 +359,84 @@ enum Failure {
 async fn start(token: Option<String>, id: u64) {
     let restoring = token.is_some();
     let result = open(token, id).await;
-    let mut slot = lock(&SLOT);
-    slot.starting = false;
-    match result {
-        Ok((remote, token)) => {
-            if let Some(token) = token {
-                save_token(&token);
+    let unwanted = {
+        let mut slot = lock(&SLOT);
+        slot.starting = false;
+        let unwanted = match result {
+            Ok((remote, token)) => {
+                if let Some(token) = token {
+                    save_token(&token);
+                }
+                slot.error = None;
+                slot.restore_failed = false;
+                let remote = Arc::new(remote);
+                if slot.keeps_opened() {
+                    log::info!(
+                        "dictation: keyboard access allowed{}",
+                        if remote.has_clipboard() { ", with the clipboard" } else { "" }
+                    );
+                    slot.active = Some(remote.clone());
+                    portal::spawn(watch(remote));
+                    None
+                } else {
+                    // Dictation was turned off while the desktop answered.
+                    log::info!("dictation: keyboard access came back after dictation was turned off; closing it");
+                    Some(remote)
+                }
             }
-            log::info!("dictation: keyboard access allowed{}", if remote.has_clipboard() { ", with the clipboard" } else { "" });
-            let remote = Arc::new(remote);
-            slot.active = Some(remote.clone());
-            slot.error = None;
-            slot.restore_failed = false;
-            portal::spawn(watch(remote));
-        }
-        Err(Failure::Declined) => {
-            log::info!("dictation: keyboard access was declined");
-            forget_token();
-            slot.error = Some("Keyboard access was declined".into());
-            slot.restore_failed = true;
-        }
-        Err(Failure::Other(e)) => {
-            log::warn!("dictation: no keyboard access: {}", e);
-            slot.error = Some(e);
-            slot.restore_failed |= restoring;
-        }
+            Err(Failure::Declined) => {
+                log::info!("dictation: keyboard access was declined");
+                forget_token();
+                slot.error = Some("Keyboard access was declined".into());
+                slot.restore_failed = true;
+                None
+            }
+            Err(Failure::Other(e)) => {
+                log::warn!("dictation: no keyboard access: {}", e);
+                slot.error = Some(e);
+                slot.restore_failed |= restoring;
+                None
+            }
+        };
+        CHANGED.notify_all();
+        unwanted
+    };
+    if let Some(remote) = unwanted {
+        let _ = remote.session.close().await;
     }
-    CHANGED.notify_all();
+}
+
+/// Follow who owns the clipboard from now on, into `tx`: subscribed before the session starts,
+/// so the owner the desktop announces as it starts is not missed. Ends when `tx` is dropped.
+async fn follow_owner(tx: mpsc::UnboundedSender<OwnerChange>) -> bool {
+    let Ok(proxy) = Clipboard::new().await else { return false };
+    let (ready, subscribed) = tokio::sync::oneshot::channel::<()>();
+    let spawned = portal::spawn(async move {
+        let stream = match proxy.receive_selection_owner_changed::<RemoteDesktop>().await {
+            Ok(stream) => stream,
+            Err(e) => {
+                log::info!("dictation: cannot follow the clipboard's owner ({})", describe(&e));
+                return;
+            }
+        };
+        let _ = ready.send(());
+        let mut stream = std::pin::pin!(stream);
+        loop {
+            tokio::select! {
+                change = stream.next() => match change {
+                    Some((_, change)) => {
+                        let change = (change.session_is_owner() == Some(true), change.mime_types().to_vec());
+                        if tx.send(change).is_err() {
+                            return;
+                        }
+                    }
+                    None => return,
+                },
+                _ = tx.closed() => return,
+            }
+        }
+    });
+    spawned && subscribed.await.is_ok()
 }
 
 async fn open(token: Option<String>, id: u64) -> Result<(Remote, Option<String>), Failure> {
@@ -332,9 +455,15 @@ async fn open(token: Option<String>, id: u64) -> Result<(Remote, Option<String>)
     let selected = async { portal.select_devices(&session, options).await?.response() };
     selected.await.map_err(|e| fail("ask for the keyboard", e))?;
     // The clipboard must be asked for before the session starts.
+    let (owner_tx, owner_rx) = mpsc::unbounded_channel();
     let clipboard = match Clipboard::new().await {
         Ok(clipboard) => match clipboard.request(&session, Default::default()).await {
-            Ok(()) => Some(clipboard),
+            Ok(()) => {
+                if !follow_owner(owner_tx).await {
+                    log::info!("dictation: the clipboard's owner is unknown; it will not be put back after pasting");
+                }
+                Some(clipboard)
+            }
             Err(e) => {
                 log::info!("dictation: the portal clipboard is not available ({})", describe(&e));
                 None
@@ -360,6 +489,7 @@ async fn open(token: Option<String>, id: u64) -> Result<(Remote, Option<String>)
         id,
         portal,
         session,
+        owners: Mutex::new(clipboard.as_ref().map(|_| owner_rx)),
         clipboard,
         offer: Mutex::new(None),
         owns_selection: AtomicBool::new(false),
@@ -381,24 +511,26 @@ async fn watch(remote: Arc<Remote>) {
         }
     };
     let mut closed = std::pin::pin!(closed);
-    let (mut transfers, mut owners) = match &remote.clipboard {
-        Some(c) => (
-            c.receive_selection_transfer::<RemoteDesktop>().await.ok().map(Box::pin),
-            c.receive_selection_owner_changed::<RemoteDesktop>().await.ok().map(Box::pin),
-        ),
-        None => (None, None),
+    let mut transfers = match &remote.clipboard {
+        Some(c) => c.receive_selection_transfer::<RemoteDesktop>().await.ok().map(Box::pin),
+        None => None,
     };
+    let mut owners = lock(&remote.owners).take();
     loop {
         tokio::select! {
             _ = closed.next() => break,
             _ = remote.ended.notified() => return,
             Some((_, mime, serial)) = next(&mut transfers) => remote.serve(mime, serial).await,
-            Some((_, change)) = next(&mut owners) => {
-                let ours = change.session_is_owner() == Some(true);
+            Some((ours, types)) = recv(&mut owners) => {
                 remote.owns_selection.store(ours, Ordering::SeqCst);
                 if !ours {
                     *lock(&remote.offer) = None;
-                    *lock(&remote.foreign_types) = Some(change.mime_types().to_vec());
+                    *lock(&remote.foreign_types) = Some(types);
+                    if take_lingering(&remote) {
+                        // Kept only to serve the clipboard, which another app has now.
+                        let _ = remote.session.close().await;
+                        return;
+                    }
                 }
             }
         }
@@ -408,13 +540,35 @@ async fn watch(remote: Arc<Remote>) {
     if slot.active.as_ref().is_some_and(|a| a.id == remote.id) {
         slot.active = None;
     }
+    if slot.lingering.as_ref().is_some_and(|a| a.id == remote.id) {
+        slot.lingering = None;
+    }
     CHANGED.notify_all();
+}
+
+/// Stop keeping `remote` for the clipboard alone; true when it was kept for that.
+fn take_lingering(remote: &Remote) -> bool {
+    let mut slot = lock(&SLOT);
+    if slot.lingering.as_ref().is_some_and(|l| l.id == remote.id) {
+        slot.lingering = None;
+        true
+    } else {
+        false
+    }
 }
 
 /// The next item of a stream that may not exist (then: never).
 async fn next<S: futures_util::Stream + Unpin>(stream: &mut Option<S>) -> Option<S::Item> {
     match stream {
         Some(s) => s.next().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// The next message of a channel that may not exist (then: never).
+async fn recv<T>(rx: &mut Option<mpsc::UnboundedReceiver<T>>) -> Option<T> {
+    match rx {
+        Some(rx) => rx.recv().await,
         None => std::future::pending().await,
     }
 }
@@ -493,6 +647,42 @@ mod tests {
     fn the_token_lives_in_the_cache() {
         let path = token_file(Path::new("/home/u"));
         assert_eq!(path, Path::new("/home/u/.talkr/cache/wayland-keyboard-access.token"));
+    }
+
+    #[test]
+    fn access_is_reported_without_opening_anything() {
+        let mut slot = Slot::new();
+        assert!(!slot.allowed(|| false));
+        // A token from an earlier run: allowed, while it restores and after.
+        assert!(slot.allowed(|| true));
+        slot.starting = true;
+        assert!(slot.allowed(|| true));
+        // It failed to restore: the user has to allow access again.
+        slot.restore_failed = true;
+        assert!(!slot.allowed(|| true));
+        // The status check itself started nothing.
+        assert!(slot.active.is_none() && !slot.wanted && slot.next_id == 1);
+    }
+
+    #[test]
+    fn a_session_opening_after_close_is_not_kept() {
+        let mut slot = Slot::new();
+        // Dictation on: a restore starts.
+        slot.wanted = true;
+        slot.starting = true;
+        // Turned off before the desktop answered.
+        slot.wanted = false;
+        assert!(!slot.keeps_opened());
+        // And on again: the same restore serves the new start.
+        slot.wanted = true;
+        assert!(slot.keeps_opened());
+    }
+
+    #[test]
+    fn typing_has_time_for_slow_desktops() {
+        // A long dictation at 10 ms per round trip still fits.
+        assert!(budget(4_000) >= Duration::from_millis(10 * 4_000));
+        assert!(budget(1) >= Duration::from_secs(5));
     }
 
     #[test]

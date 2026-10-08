@@ -24,3 +24,10 @@ export function announce(state: PillState): string {
       return ''
   }
 }
+
+let pillUp = false
+/** The overlay pill shows something now (its window may be up): the theme waits to reload until it goes. */
+export const isPillUp = () => pillUp
+export const notePillUp = (up: boolean) => {
+  pillUp = up
+}

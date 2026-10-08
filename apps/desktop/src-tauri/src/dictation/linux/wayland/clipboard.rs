@@ -7,7 +7,9 @@
 //! - **the Clipboard portal** on the keyboard session (GNOME): see `remote`.
 //!
 //! The user's clipboard is saved whole (every type it offers) and put back after pasting, but
-//! only while Talkr's text is still there.
+//! only while Talkr's text is still there. Wayland has no way to hand it back to the app it came
+//! from: Talkr serves the restored copy until another app takes the clipboard, and it is lost if
+//! Talkr quits first (unless a clipboard manager kept it; the settings page says so).
 
 use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -24,7 +26,19 @@ pub const READ_TIMEOUT: Duration = Duration::from_millis(1_500);
 pub const TEXT_TYPES: &[&str] = &["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"];
 
 /// Offered with a pasted text, so restoring knows the clipboard still holds it.
-const MARKER: &str = "application/x-talkr-dictation";
+pub const MARKER: &str = "application/x-talkr-dictation";
+
+/// Offered with a pasted text so clipboard managers do not keep it (KDE's convention, also
+/// honoured by others).
+pub const SENSITIVE_HINT: &str = "x-kde-passwordManagerHint";
+
+/// `text` for one paste: every text type, the marker and the hint.
+pub fn paste_contents(text: &str) -> Contents {
+    let mut contents = text_contents(text);
+    contents.push((MARKER.into(), b"1".to_vec()));
+    contents.push((SENSITIVE_HINT.into(), b"secret".to_vec()));
+    contents
+}
 
 /// Clipboard contents: each MIME type with its data, in the owner's order.
 pub type Contents = Vec<(String, Vec<u8>)>;
@@ -170,6 +184,9 @@ mod tests {
         assert_eq!(c.len(), TEXT_TYPES.len());
         assert!(c.iter().all(|(_, d)| d == "héllo".as_bytes()));
         assert_eq!(c[0].0, "text/plain;charset=utf-8");
+        let p = paste_contents("x");
+        assert_eq!(p.len(), TEXT_TYPES.len() + 2);
+        assert!(p.iter().any(|(t, _)| t == MARKER) && p.iter().any(|(t, _)| t == SENSITIVE_HINT));
     }
 
     #[test]

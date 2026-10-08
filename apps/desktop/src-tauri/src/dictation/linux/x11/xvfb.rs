@@ -1,18 +1,20 @@
 //! The X11 backend against a real X server, with a test window of its own standing in for an
-//! app and XTEST standing in for the user's keyboard. Opt-in, since they need a display that no
+//! app, a second client for the window manager, and XTEST standing in for the user's keyboard. Opt-in, since they need a display that no
 //! one is using (CI runs them under Xvfb):
 //! `xvfb-run -a cargo test -p talkr --lib dictation::linux::x11 -- --ignored --test-threads=1`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
-use x11rb::connection::Connection;
+use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, InputFocus, PropMode, Window, WindowClass,
+    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, GrabMode, InputFocus, ModMask, PropMode, Window, WindowClass,
 };
+use x11rb::protocol::xinput::{self, ConnectionExt as _};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::protocol::Event;
 use x11rb::wrapper::ConnectionExt as _;
+use super::chord::{ALT, CTRL, WIN};
 use super::clipboard::{self, Saved, Selection};
 use super::keymap::{Keymap, CONTROL_MASK};
 use super::keys::{self, Keysym};
@@ -36,23 +38,40 @@ fn settle() {
     std::thread::sleep(Duration::from_millis(250));
 }
 
-/// The user's keyboard, through XTEST on a connection of its own.
+/// The user's keyboard: the server's own keyboard device (Xvfb's), driven through XTEST on a
+/// connection of its own. Not XTEST's virtual keyboard, which Talkr itself types with: the
+/// server keeps key state per device, and handing keys back depends on it.
 struct Keyboard {
     d: Display,
     map: Keymap,
+    /// XInput's first event code and the keyboard's device id.
+    device: (u8, u8),
 }
 
 impl Keyboard {
     fn new() -> Self {
         let d = Display::open().expect("an X server (run under xvfb-run)");
         let map = Keymap::load(&d.conn).unwrap();
-        Self { d, map }
+        let first_event = d.conn.extension_information(xinput::X11_EXTENSION_NAME).unwrap().expect("XInput").first_event;
+        let list = d.conn.xinput_list_input_devices().unwrap().reply().unwrap();
+        let id = list
+            .devices
+            .iter()
+            .zip(&list.names)
+            .find(|(dev, name)| {
+                dev.device_use == xinput::DeviceUse::IS_X_EXTENSION_KEYBOARD
+                    && !String::from_utf8_lossy(&name.name).contains("XTEST")
+            })
+            .map(|(dev, _)| dev.device_id)
+            .expect("the server's keyboard device");
+        Self { d, map, device: (first_event, id) }
     }
 
     fn key(&self, ks: Keysym, down: bool) {
         let kc = self.map.keycode_for(ks).unwrap_or_else(|| panic!("no key for {ks:#x}"));
-        let kind = if down { x11rb::protocol::xproto::KEY_PRESS_EVENT } else { x11rb::protocol::xproto::KEY_RELEASE_EVENT };
-        self.d.conn.xtest_fake_input(kind, kc, 0, x11rb::NONE, 0, 0, 0).unwrap();
+        let (first_event, id) = self.device;
+        let kind = first_event + if down { xinput::DEVICE_KEY_PRESS_EVENT } else { xinput::DEVICE_KEY_RELEASE_EVENT };
+        self.d.conn.xtest_fake_input(kind, kc, 0, self.d.root, 0, 0, id).unwrap();
         self.d.conn.sync().unwrap();
         std::thread::sleep(Duration::from_millis(60));
     }
@@ -400,4 +419,120 @@ fn xvfb_types_unicode_and_line_breaks() {
 
 fn xconn_snapshot() -> Option<target::Target> {
     super::xconn::with(target::snapshot).flatten()
+}
+
+/// A second client acting as the window manager: a passive grab on the root window for one
+/// shortcut, counting the presses and releases of its key that it is given.
+struct WindowManager {
+    counts: Arc<Mutex<(usize, usize)>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl WindowManager {
+    /// Grab `ks` with `mods` (Ctrl/Shift/Alt/Super bits), under every lock combination.
+    fn grab(ks: Keysym, mods: u8) -> Self {
+        let d = Display::open().unwrap();
+        let map = Keymap::load(&d.conn).unwrap();
+        let kc = map.keycode_for(ks).unwrap();
+        for lock in map.lock_masks() {
+            d.conn
+                .grab_key(false, d.root, ModMask::from(map.mask_of(mods) | lock), kc, GrabMode::ASYNC, GrabMode::ASYNC)
+                .unwrap()
+                .check()
+                .expect("the window manager's grab");
+        }
+        let counts = Arc::new(Mutex::new((0, 0)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (seen, stop2) = (counts.clone(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            while !stop2.load(Ordering::SeqCst) {
+                match d.conn.poll_for_event() {
+                    Ok(Some(Event::KeyPress(e))) if e.detail == kc => seen.lock().unwrap().0 += 1,
+                    Ok(Some(Event::KeyRelease(e))) if e.detail == kc => seen.lock().unwrap().1 += 1,
+                    Ok(Some(_)) => {}
+                    _ => std::thread::sleep(Duration::from_millis(2)),
+                }
+            }
+        });
+        Self { counts, stop, thread: Some(thread) }
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        *self.counts.lock().unwrap()
+    }
+}
+
+impl Drop for WindowManager {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+fn key_down(kc: u8) -> bool {
+    let d = Display::open().unwrap();
+    let keys = d.conn.query_keymap().unwrap().reply().unwrap().keys;
+    keys[kc as usize / 8] & (1 << (kc % 8)) != 0
+}
+
+#[test]
+#[ignore = "needs an X server of its own (xvfb-run)"]
+fn xvfb_window_manager_shortcuts_keep_working_during_the_chord() {
+    let _serial = serial();
+    let wm = WindowManager::grab(LEFT, CTRL | WIN);
+    let events = Events::start();
+    listener::configure(Some(&Shortcut::ctrl_win()), None);
+    assert_eq!(listener::problem(), None, "Ctrl + Super itself is free");
+    let lab = Lab::open();
+    let kb = Keyboard::new();
+    let left = kb.keycode(LEFT);
+
+    for round in 1..=2 {
+        lab.clear();
+        kb.key(keys::XK_CONTROL_L, true);
+        kb.key(keys::XK_SUPER_L, true);
+        assert_eq!(events.next(), Some(E::DictateDown));
+        kb.key(LEFT, true);
+        assert_eq!(events.next(), Some(E::Interrupted));
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(wm.counts().0, round, "the window manager got Ctrl + Super + Left, once");
+        assert!(!lab.pressed(left), "the app did not");
+        assert!(key_down(left), "still held");
+        kb.key(LEFT, false);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(wm.counts().1, round, "and its release");
+        kb.key(keys::XK_SUPER_L, false);
+        kb.key(keys::XK_CONTROL_L, false);
+        assert!(!key_down(left), "no key is left down");
+        assert!(events.none());
+    }
+
+    // Left alone is the app's, and arrives as a plain press: nothing is stuck.
+    lab.clear();
+    kb.key(LEFT, true);
+    kb.key(LEFT, false);
+    assert!(lab.wait_for(|s| s.presses.iter().any(|&(k, state)| k == left && state & CONTROL_MASK == 0)));
+    assert_eq!(wm.counts(), (2, 2));
+    assert!(events.none());
+    listener::stop();
+}
+
+#[test]
+#[ignore = "needs an X server of its own (xvfb-run)"]
+fn xvfb_a_shortcut_another_program_owns_is_reported() {
+    let _serial = serial();
+    let _other = WindowManager::grab(SPACE, CTRL | ALT);
+    let _events = Events::start();
+    let taken = Shortcut { ctrl: true, shift: false, alt: true, win: false, key: Some(0x20), key_label: Some("Space".into()) };
+    listener::configure(Some(&taken), Some(&Shortcut::alt_shift_v()));
+    let problem = listener::problem().expect("the conflict is reported");
+    assert!(problem.contains("Ctrl + Alt + Space") && problem.contains("dictation shortcut"), "{problem}");
+    assert!(!problem.contains("paste-again"), "{problem}");
+    assert_eq!(<super::Os as Backend>::hotkeys_problem(), Some(problem));
+    listener::configure(Some(&Shortcut::ctrl_win()), Some(&Shortcut::alt_shift_v()));
+    assert_eq!(listener::problem(), None, "a free shortcut clears it");
+    listener::stop();
 }

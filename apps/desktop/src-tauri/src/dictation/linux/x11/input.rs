@@ -52,6 +52,48 @@ fn fake(d: &Display, keycode: u8, down: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Hand a key the user is holding back to the server as a fresh press, after Talkr's grab has
+/// been let go. Replaying the grabbed event instead would skip every passive grab on the root
+/// window, the window manager's too, so Ctrl + Super + Left would reach the app rather than
+/// switch workspaces. Sent on `d` right after the ungrab, so the server takes them in order.
+///
+/// The server ignores a press of a key that is already down, so it takes three events: a press
+/// (ignored, but it marks the key down on the XTEST device), a release (the key is up: an
+/// unmatched release for the focused window, which apps ignore), and the press that counts,
+/// matched against every grab with the modifiers the user holds. That press stays down on the
+/// XTEST device until [`release_when_up`] lets it go.
+pub fn resend_held(d: &Display, keycode: u8) -> Result<(), String> {
+    let _injecting = Injecting::start();
+    fake(d, keycode, true)?;
+    fake(d, keycode, false)?;
+    fake(d, keycode, true)?;
+    d.conn.flush().x()
+}
+
+/// Once the user lets go of a key [`resend_held`] pressed, release it on the XTEST device too,
+/// so no key is left down there. (The server already counts the key as up by then: this release
+/// changes nothing anyone sees.)
+pub fn release_when_up(keycode: u8) {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30 * 60);
+        loop {
+            std::thread::sleep(Duration::from_millis(25));
+            let down = super::xconn::with(|d| {
+                let keys = d.conn.query_keymap().x()?.reply().x()?.keys;
+                Ok(keys[keycode as usize / 8] & (1 << (keycode % 8)) != 0)
+            });
+            if down != Some(true) || Instant::now() >= deadline {
+                break;
+            }
+        }
+        super::xconn::with(|d| {
+            let _injecting = Injecting::start();
+            fake(d, keycode, false)?;
+            d.conn.sync().x()
+        });
+    });
+}
+
 /// The modifiers (Ctrl, Shift, Alt, Super) held right now. Reads the pointer's modifier state
 /// only, not which keys are down.
 pub fn held_modifiers(d: &Display, keymap: &Keymap) -> Result<u8, String> {

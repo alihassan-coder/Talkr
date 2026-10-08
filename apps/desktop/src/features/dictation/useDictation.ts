@@ -92,6 +92,9 @@ const previewSettings: Settings = {
   dictation: defaultDictation,
 }
 
+/** How often the page asks for the status while it waits on the system. */
+export const STATUS_POLL_MS = 3000
+
 /**
  * The settings and live status behind the Dictation page. Saves are optimistic: the page
  * changes at once, and a failed save puts back what was there (unless a newer change landed).
@@ -104,6 +107,9 @@ export function useDictation() {
   )
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<DictationStatus>(preview.status)
+  // In the app, the page waits for the real status: the preview's Windows keys and rules would
+  // flash on a Mac or Linux.
+  const [statusLoaded, setStatusLoaded] = useState(!tauri)
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
   const seq = useRef(0)
   // The newest dictation settings, including a change not rendered yet: two quick changes in a
@@ -123,10 +129,18 @@ export function useDictation() {
       .then((s) => alive && setSettings(s))
       .catch((e: unknown) => alive && setError(errorText(e)))
     dictationStatus()
-      .then((s) => alive && setStatus(s))
-      .catch(() => {})
+      .then((s) => {
+        if (!alive) return
+        setStatus(s)
+        setStatusLoaded(true)
+      })
+      .catch((e: unknown) => alive && setError(errorText(e)))
     const unlisten = [
-      onDictationStatus((s) => alive && setStatus(s)),
+      onDictationStatus((s) => {
+        if (!alive) return
+        setStatus(s)
+        setStatusLoaded(true)
+      }),
       onSettingsChanged((s) => alive && setSettings(s)),
     ]
     return () => {
@@ -148,6 +162,21 @@ export function useDictation() {
       .then(setStatus)
       .catch(() => {})
   }, [])
+
+  // Waiting on the system (a permission being granted in its settings, a listener starting up):
+  // look again now and then, so the page follows without a click.
+  const enabled = settings?.dictation.enabled ?? false
+  const waiting =
+    tauri && statusLoaded && status.supported && (status.permission.state === 'missing' || (enabled && !status.active))
+  useEffect(() => {
+    if (!waiting) return
+    const t = setInterval(refreshStatus, STATUS_POLL_MS)
+    window.addEventListener('focus', refreshStatus)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('focus', refreshStatus)
+    }
+  }, [waiting, refreshStatus])
 
   /** Change some dictation settings. Resolves to whether it was saved. */
   const save = useCallback(
@@ -196,8 +225,9 @@ export function useDictation() {
   )
 
   return {
-    settings,
-    dictation: settings?.dictation ?? null,
+    // Both arrive before the page shows (see `statusLoaded`).
+    settings: statusLoaded ? settings : null,
+    dictation: statusLoaded ? (settings?.dictation ?? null) : null,
     status,
     error,
     saving,

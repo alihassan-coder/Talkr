@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { dictationCancel, dictationStop, isTauri } from '@/lib/api'
 import { PillView } from '@/overlay/PillView'
+import { notePillUp } from '@/overlay/state'
 import type { PillState } from '@/overlay/state'
 
 export type { PillState } from '@/overlay/state'
@@ -18,6 +19,7 @@ export function Pill({ initial = { kind: 'hidden' } }: { initial?: PillState }) 
     const win = getCurrentWebviewWindow()
     const unlisten = [
       win.listen<PillState>('dictation://overlay', (e) => {
+        notePillUp(e.payload.kind !== 'hidden')
         setState(e.payload)
         if (e.payload.kind !== 'listening') level.current = 0
       }),

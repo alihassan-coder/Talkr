@@ -83,6 +83,10 @@ impl Backend for Os {
         listener::configure(dictate, paste_last);
     }
 
+    fn hotkeys_problem() -> Option<String> {
+        listener::problem()
+    }
+
     fn set_recording(recording: bool) {
         listener::set_recording(recording);
     }
