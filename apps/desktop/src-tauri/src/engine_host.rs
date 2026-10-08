@@ -13,7 +13,9 @@
 //! Binaries, installed next to the app's executable:
 //! - `talkr-engine`: CPU on Windows/Linux; on macOS it also drives Metal.
 //! - `talkr-engine-gpu` (Windows/Linux, optional): the Vulkan build. It needs the Vulkan
-//!   loader to even start, which is why the CPU build exists alongside it.
+//!   loader to even start, which is why the CPU build exists alongside it. On Windows it is only
+//!   offered when `vulkan-1.dll` can be loaded, and the engines are started with Windows' error
+//!   dialogs off, so a missing library is an exit code Talkr handles, not a "System Error" box.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -83,6 +85,8 @@ pub trait Launcher: Send + Sync {
 pub struct NativeLauncher {
     cpu: PathBuf,
     gpu: Option<PathBuf>,
+    /// Why an installed GPU build is not used, for the log (which starts after `locate`).
+    note: Option<String>,
 }
 
 impl NativeLauncher {
@@ -101,7 +105,95 @@ impl NativeLauncher {
         let gpu = dev_override("TALKR_ENGINE_GPU")
             .or_else(|| Some(exe("talkr-engine-gpu")))
             .filter(|p| p.is_file());
-        Self { cpu, gpu }
+        let mut note = None;
+        let gpu = match gpu {
+            Some(path) if !vulkan_loader_present() => {
+                note = Some(format!("no Vulkan loader on this system; the GPU engine {} is not used", path.display()));
+                None
+            }
+            gpu => gpu,
+        };
+        Self { cpu, gpu, note }
+    }
+
+    /// Why the GPU build is not used, when one is installed but cannot run here.
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+}
+
+/// Whether the Vulkan loader the GPU build links against can be loaded. Without it Windows
+/// refuses to start the GPU build at all (STATUS_DLL_NOT_FOUND), so it is not worth trying.
+#[cfg(windows)]
+fn vulkan_loader_present() -> bool {
+    use windows::core::w;
+    use windows::Win32::Foundation::FreeLibrary;
+    use windows::Win32::System::LibraryLoader::{
+        LoadLibraryExW, LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
+    // Where the GPU build looks first: next to the executables (if an installer ships the
+    // loader), then System32, where Vulkan drivers install it.
+    let flags = LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32;
+    let _quiet = QuietLoaderErrors::new();
+    match unsafe { LoadLibraryExW(w!("vulkan-1.dll"), None, flags) } {
+        Ok(module) => {
+            let _ = unsafe { FreeLibrary(module) };
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+fn vulkan_loader_present() -> bool {
+    true
+}
+
+/// Turns Windows' error dialogs off for this process while it lives, then restores the previous
+/// mode. A process inherits its parent's error mode when it starts, so engines started meanwhile
+/// fail with an exit code (a missing DLL is 0xC0000135) instead of a "System Error" dialog, and a
+/// crashing engine exits at once instead of waiting behind a crash dialog nobody asked for.
+/// Talkr's own dialogs are its windows and are unaffected; it only borrows the mode briefly.
+#[cfg(windows)]
+pub(crate) struct QuietLoaderErrors {
+    previous: u32,
+    _serial: MutexGuard<'static, ()>,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetErrorMode(mode: u32) -> u32;
+    fn GetErrorMode() -> u32;
+}
+
+#[cfg(windows)]
+impl QuietLoaderErrors {
+    pub(crate) const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+    pub(crate) const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+    pub(crate) const SEM_NOOPENFILEERRORBOX: u32 = 0x8000;
+    pub(crate) const MODE: u32 =
+        Self::SEM_FAILCRITICALERRORS | Self::SEM_NOGPFAULTERRORBOX | Self::SEM_NOOPENFILEERRORBOX;
+
+    pub(crate) fn new() -> Self {
+        // Serialized: two overlapping guards would restore each other's mode.
+        static SERIAL: Mutex<()> = Mutex::new(());
+        let serial = lock(&SERIAL);
+        let previous = unsafe { GetErrorMode() };
+        unsafe { SetErrorMode(previous | Self::MODE) };
+        Self { previous, _serial: serial }
+    }
+
+    #[cfg(test)]
+    fn current() -> u32 {
+        unsafe { GetErrorMode() }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for QuietLoaderErrors {
+    fn drop(&mut self) {
+        unsafe { SetErrorMode(self.previous) };
     }
 }
 
@@ -119,7 +211,12 @@ impl Launcher for NativeLauncher {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = cmd.spawn().map_err(|e| {
+        let spawned = {
+            #[cfg(windows)]
+            let _quiet = QuietLoaderErrors::new();
+            cmd.spawn()
+        };
+        let mut child = spawned.map_err(|e| {
             std::io::Error::new(e.kind(), format!("could not start {}: {}", path.display(), e))
         })?;
         Ok(Launched {
@@ -855,6 +952,9 @@ mod tests {
         Hang,
         /// Write a line that is not UTF-8 before each answer.
         Garbage,
+        /// Start, then exit with this code before reading anything, as Windows ends a program
+        /// whose DLLs are missing (STATUS_DLL_NOT_FOUND) once its error dialog is off.
+        ExitAtStart(Exit),
     }
 
     struct FakeProcess {
@@ -909,6 +1009,10 @@ mod tests {
             let thread_exit = exit.clone();
             std::thread::spawn(move || {
                 let _done = done_tx;
+                if let Script::ExitAtStart(e) = script {
+                    *lock(&thread_exit) = Some(e);
+                    return;
+                }
                 let _ = ev_w.write_all(to_line(&Event::Ready { version: "test".into() }).as_bytes());
                 for line in BufReader::new(req_r).lines() {
                     let Ok(line) = line else { break };
@@ -1119,6 +1223,77 @@ mod tests {
         assert!(matches!(answer, Ok(Event::Transcribed { .. })), "{answer:?}");
         assert_eq!(*lock(&launches), vec![Variant::Cpu]);
         assert!(host.gpu_failed());
+    }
+
+    #[test]
+    fn a_gpu_build_missing_its_vulkan_loader_falls_back_to_the_cpu() {
+        let dll_not_found = Exit::Code(0xC000_0135);
+        let (host, launches, _) = make_host(FakeLauncher::new(Script::Healthy, Some(Script::ExitAtStart(dll_not_found))));
+        let answer = host.run("j1", &transcribe, true, &|_| {});
+        assert!(matches!(answer, Ok(Event::Transcribed { ref device, .. }) if device == "cpu"), "{answer:?}");
+        assert_eq!(*lock(&launches), vec![Variant::Gpu, Variant::Cpu]);
+        assert!(host.gpu_failed() && !host.gpu_available());
+        // Later jobs go straight to the CPU, without trying the GPU build again.
+        host.run("j2", &transcribe, true, &|_| {}).unwrap();
+        assert_eq!(*lock(&launches), vec![Variant::Gpu, Variant::Cpu]);
+        assert_eq!(describe(dll_not_found), "a library it needs is missing");
+    }
+
+    #[test]
+    fn probing_survives_a_gpu_build_missing_its_vulkan_loader() {
+        let (host, launches, _) =
+            make_host(FakeLauncher::new(Script::Healthy, Some(Script::ExitAtStart(Exit::Code(0xC000_0135)))));
+        assert!(!host.devices().is_empty(), "the CPU engine answered the probe");
+        assert!(host.gpu_failed() && !host.should_use_gpu(GpuPolicy::Prefer));
+        assert_eq!(*lock(&launches), vec![Variant::Gpu, Variant::Cpu]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn engines_start_with_error_dialogs_off_and_the_app_keeps_its_own_mode() {
+        let before = QuietLoaderErrors::current();
+        {
+            let _quiet = QuietLoaderErrors::new();
+            let mode = QuietLoaderErrors::current();
+            assert_eq!(mode & QuietLoaderErrors::MODE, QuietLoaderErrors::MODE, "{mode:#x}");
+        }
+        assert_eq!(QuietLoaderErrors::current(), before, "restored afterwards");
+    }
+
+    /// The Vulkan GPU build on a PC without Vulkan: it must end with STATUS_DLL_NOT_FOUND rather
+    /// than wait behind a "System Error" dialog, even when Talkr itself runs with Windows' default
+    /// error mode (as when started from Explorer), and the launcher must not offer it at all.
+    /// `TALKR_ENGINE_GPU=<a Vulkan build> cargo test --lib missing_vulkan_lab -- --ignored`
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs a Vulkan engine build (TALKR_ENGINE_GPU) and a PC without vulkan-1.dll"]
+    fn missing_vulkan_lab() {
+        let gpu = PathBuf::from(std::env::var_os("TALKR_ENGINE_GPU").expect("set TALKR_ENGINE_GPU"));
+        assert!(gpu.is_file(), "{}", gpu.display());
+        assert!(!vulkan_loader_present(), "this PC has a Vulkan loader; nothing to test");
+        assert!(!NativeLauncher::locate().has_gpu_build(), "the GPU build is not offered");
+
+        // Started anyway (as the CPU variant, so the check above does not stop it).
+        let previous = unsafe { SetErrorMode(0) };
+        let launched = NativeLauncher { cpu: gpu.clone(), gpu: None, note: None }.launch(Variant::Cpu);
+        assert_eq!(QuietLoaderErrors::current(), 0, "Talkr's own mode is back as it was");
+        unsafe { SetErrorMode(previous) };
+        let mut launched = launched.expect("CreateProcess itself succeeds");
+        let started = Instant::now();
+        let exit = loop {
+            if let Some(exit) = launched.process.try_wait() {
+                break exit;
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                launched.process.kill();
+                panic!("still running after 10 s: a \"System Error\" dialog is up");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        // STATUS_DLL_NOT_FOUND, or STATUS_INVALID_IMAGE_FORMAT when the loader trips over another
+        // DLL first: either way a quick exit Talkr reports as a missing library, not a dialog.
+        assert!(matches!(exit, Exit::Code(0xC000_0135) | Exit::Code(0xC000_007B)), "{exit:?}");
+        assert_eq!(describe(exit), "a library it needs is missing");
     }
 
     #[test]

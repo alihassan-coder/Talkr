@@ -150,13 +150,13 @@ pub fn is_down(vk: u16) -> bool {
 
 const MODIFIERS: [u16; 8] = [VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN];
 
-/// Whether every key of `shortcut` is physically held right now.
-pub fn shortcut_held(shortcut: &crate::dictation::settings::Shortcut) -> bool {
+/// Whether every modifier of `shortcut` is physically held right now. (Not its key: Talkr's hook
+/// keeps that from apps, and Windows' key state then never shows it down.)
+pub fn modifiers_held(shortcut: &crate::dictation::settings::Shortcut) -> bool {
     (!shortcut.ctrl || is_down(VK_CONTROL))
         && (!shortcut.shift || is_down(VK_SHIFT))
         && (!shortcut.alt || is_down(VK_MENU))
         && (!shortcut.win || is_down(VK_LWIN) || is_down(VK_RWIN))
-        && shortcut.key.is_none_or(is_down)
 }
 
 /// Wait until the user has let go of Ctrl, Shift, Alt and Win, so a paste is not read as

@@ -65,7 +65,9 @@ impl Backend for Os {
     }
 
     fn shortcut_held(shortcut: &Shortcut) -> Option<bool> {
-        Some(keys::shortcut_held(shortcut))
+        // The hook keeps a key shortcut's key from apps, so Windows' key state never shows it
+        // down: ask the hook about the key, and Windows about the modifiers.
+        Some(keys::modifiers_held(shortcut) && (shortcut.key.is_none() || hook::dictate_held()))
     }
 
     fn on_shortcut_pressed(shortcut: &Shortcut) {

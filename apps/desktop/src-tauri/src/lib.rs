@@ -183,7 +183,9 @@ pub fn run() {
     let hardware = HardwareProbe::new();
     hardware.warm_up();
     let log_dir = paths.logs.clone();
-    let engine = EngineHost::new(Box::new(NativeLauncher::locate()), Some(paths.cache.join("engine-gpu-failed")));
+    let launcher = NativeLauncher::locate();
+    let engine_note = launcher.note().map(str::to_string);
+    let engine = EngineHost::new(Box::new(launcher), Some(paths.cache.join("engine-gpu-failed")));
 
     tauri::Builder::default()
         // First: a second launch hands over to the running Talkr (which shows its window) and
@@ -290,6 +292,9 @@ pub fn run() {
 
             for notice in &startup_notices {
                 log::warn!("{}", notice);
+            }
+            if let Some(note) = &engine_note {
+                log::info!("{}", note);
             }
 
             let state = app.state::<AppState>();

@@ -146,7 +146,9 @@ pub trait Backend {
     fn set_capturing(capturing: bool);
 
     /// Whether the shortcut's keys are physically held right now, as a backstop for a release
-    /// that was never reported. `None` when the system cannot tell.
+    /// that was never reported. `None` when the system cannot tell. A key the listener keeps
+    /// from apps may never reach the system's key state (it does not on Windows): answer for it
+    /// from the listener's own view, or every key shortcut would look released at once.
     fn shortcut_held(_shortcut: &Shortcut) -> Option<bool> {
         None
     }

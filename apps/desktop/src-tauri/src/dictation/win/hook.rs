@@ -35,6 +35,10 @@ static PASTE_LAST: AtomicU64 = AtomicU64::new(0);
 static RECORDING: AtomicBool = AtomicBool::new(false);
 /// While the settings page records a new shortcut, every key goes to it instead.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
+/// The dictation shortcut is held, as the hook saw it. The key of a key shortcut is kept from
+/// apps, and Windows then leaves it out of its key state (`GetAsyncKeyState` says it is up), so
+/// this is the only place that knows it is down.
+static DICTATE_HELD: AtomicBool = AtomicBool::new(false);
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// The hook thread, joined on stop so a quick stop and start cannot race.
 static THREAD: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(None);
@@ -82,6 +86,11 @@ pub fn set_capturing(capturing: bool) {
 
 pub fn is_running() -> bool {
     THREAD_ID.load(Ordering::SeqCst) != 0
+}
+
+/// Whether the dictation shortcut is held right now, as far as the hook knows.
+pub fn dictate_held() -> bool {
+    DICTATE_HELD.load(Ordering::SeqCst)
 }
 
 fn modifier_bit(vk: u16) -> u8 {
@@ -146,6 +155,12 @@ fn remove(list: &mut Vec<u16>, vk: u16) -> bool {
 
 /// One key event; returns whether to keep it from the focused app.
 fn handle(state: &mut State, vk: u16, down: bool, physically_down: &dyn Fn(u16) -> bool) -> bool {
+    let swallow = handle_key(state, vk, down, physically_down);
+    DICTATE_HELD.store(state.dictate_active, Ordering::SeqCst);
+    swallow
+}
+
+fn handle_key(state: &mut State, vk: u16, down: bool, physically_down: &dyn Fn(u16) -> bool) -> bool {
     let repeat = down && state.down.contains(&vk);
     if down && repeat && state.swallowed.contains(&vk) {
         // Auto-repeat of a key whose press was kept from the app: keep the repeats too, even
@@ -155,9 +170,13 @@ fn handle(state: &mut State, vk: u16, down: bool, physically_down: &dyn Fn(u16) 
     if down && !repeat {
         // A key released while another app held the keyboard (an elevated window, the secure
         // desktop) never reached this hook: drop keys the system says are up, so they can
-        // neither break shortcuts nor have a later press swallowed.
-        state.down.retain(|&k| k == vk || physically_down(k));
-        state.swallowed.retain(|&k| k != vk && physically_down(k));
+        // neither break shortcuts nor have a later press swallowed. Except keys this hook keeps
+        // from apps: the system never learns those are down, and dropping one while it is held
+        // would make its next auto-repeat look like a fresh press of the shortcut.
+        let swallowed = std::mem::take(&mut state.swallowed);
+        let held = |k: u16| physically_down(k) || swallowed.contains(&k);
+        state.down.retain(|&k| k == vk || held(k));
+        state.swallowed = swallowed.iter().copied().filter(|&k| k != vk && held(k)).collect();
         state.down.push(vk);
     }
     if !down {
@@ -410,6 +429,7 @@ pub fn start(events: flume::Sender<HotkeyEvent>) -> Result<(), String> {
             }
             THREAD_ID.store(0, Ordering::SeqCst);
             STATE.with(|s| *s.borrow_mut() = State::default());
+            DICTATE_HELD.store(false, Ordering::SeqCst);
             log::info!("dictation shortcut listener stopped");
         })
         .map_err(|e| e.to_string())?;
@@ -559,6 +579,49 @@ mod tests {
         // And Space works normally afterwards.
         assert!(!h.key(SPACE, true));
         assert!(!h.key(SPACE, false));
+    }
+
+    /// Like Windows' key state: keys the hook kept from apps never show as down.
+    fn system_view(h: &Harness) -> impl Fn(u16) -> bool {
+        let visible: Vec<u16> = h.state.down.iter().copied().filter(|k| !h.state.swallowed.contains(k)).collect();
+        move |k| visible.contains(&k)
+    }
+
+    #[test]
+    fn a_held_key_shortcut_counts_as_held_though_windows_cannot_see_its_key() {
+        let s = Shortcut { ctrl: true, alt: true, shift: false, win: false, key: Some(0x77), key_label: None };
+        let (mut h, _g) = Harness::new(Some(s), None);
+        for vk in [LCTRL, keys::VK_LMENU, 0x77] {
+            let view = system_view(&h);
+            handle(&mut h.state, vk, true, &view);
+        }
+        assert!(dictate_held(), "held while F8 is down");
+        assert_eq!(h.events(), vec![E::DictateDown]);
+        let view = system_view(&h);
+        assert!(handle(&mut h.state, 0x77, false, &view), "the release stays with the hook");
+        assert!(!dictate_held());
+        assert_eq!(h.events(), vec![E::DictateUp]);
+    }
+
+    #[test]
+    fn escape_while_holding_a_key_shortcut_does_not_start_another_dictation() {
+        let s = Shortcut { ctrl: true, alt: true, shift: false, win: false, key: Some(0x77), key_label: None };
+        let (mut h, _g) = Harness::new(Some(s), None);
+        let key = |h: &mut Harness, vk: u16, down: bool| {
+            let view = system_view(h);
+            handle(&mut h.state, vk, down, &view)
+        };
+        key(&mut h, LCTRL, true);
+        key(&mut h, keys::VK_LMENU, true);
+        assert!(key(&mut h, 0x77, true));
+        RECORDING.store(true, Ordering::SeqCst);
+        assert!(key(&mut h, VK_ESCAPE, true));
+        RECORDING.store(false, Ordering::SeqCst); // the dictation was cancelled
+        assert!(key(&mut h, VK_ESCAPE, false));
+        // F8 is still held, and Windows repeats it: still the same press.
+        assert!(key(&mut h, 0x77, true), "the repeat stays with the hook");
+        assert!(key(&mut h, 0x77, false));
+        assert_eq!(h.events(), vec![E::DictateDown, E::Cancel, E::DictateUp]);
     }
 
     #[test]
