@@ -100,8 +100,20 @@ windows = { version = "0.62", features = [
 
 
 # -- Wayland backend (src/dictation/linux/wayland) --
-
-
+# The XDG desktop portals over D-Bus (pure Rust, through zbus): GlobalShortcuts for the
+# shortcut, RemoteDesktop to type and Clipboard to paste. async-io, not tokio: zbus keeps its own
+# executor thread, so the other crates that use zbus blocking (single-instance, opener) are
+# unaffected.
+ashpd = { version = "0.13", default-features = false, features = [
+  "async-io",
+  "clipboard",
+  "global_shortcuts",
+  "remote_desktop",
+  "screencast",
+] }
+futures-util = { version = "0.3", default-features = false }
+# The clipboard without a focused window, through the data-control protocols (wlroots, KDE).
+wl-clipboard-rs = "0.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }
