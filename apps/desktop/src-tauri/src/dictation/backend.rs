@@ -46,8 +46,8 @@ pub struct Capabilities {
 /// Something the system must allow before dictation works fully.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "camelCase")]
-// Windows needs no permission; macOS and Linux build the other variants.
-#[cfg_attr(windows, allow(dead_code))]
+// Not every backend needs every state (Windows needs no permission at all).
+#[allow(dead_code)]
 pub enum Permission {
     /// Nothing to allow.
     NotNeeded,
