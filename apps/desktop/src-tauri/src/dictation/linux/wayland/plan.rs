@@ -20,8 +20,9 @@ pub struct Availability {
     pub primary: bool,
 }
 
-/// What the settings page shows. `shortcut` describes the shortcut the desktop bound, if known.
-pub fn capabilities(av: &Availability, shortcut: Option<&str>) -> Capabilities {
+/// What the settings page shows. `shortcut` describes the shortcut the desktop bound, if known;
+/// `hyprland` is the hyprland.conf line that binds it, on Hyprland (which binds nothing itself).
+pub fn capabilities(av: &Availability, shortcut: Option<&str>, hyprland: Option<&str>) -> Capabilities {
     Capabilities {
         os: "linux",
         // Without the portal, `talkr --dictate` bound to a key in the system settings works.
@@ -32,19 +33,24 @@ pub fn capabilities(av: &Availability, shortcut: Option<&str>) -> Capabilities {
         verifies_insertion: false,
         inserts_text: av.keyboard,
         meta_key: "Super",
-        note: Some(note(av, shortcut)),
+        note: Some(note(av, shortcut, hyprland)),
     }
 }
 
-fn note(av: &Availability, shortcut: Option<&str>) -> String {
-    let shortcut = match (av.shortcuts, shortcut) {
-        (true, Some(s)) => format!("Wayland session: the shortcut is {}, bound by your desktop; change it in its keyboard settings.", s),
-        (true, None) => {
+fn note(av: &Availability, shortcut: Option<&str>, hyprland: Option<&str>) -> String {
+    let shortcut = match (av.shortcuts, shortcut, hyprland) {
+        (true, _, Some(line)) => format!(
+            "Wayland session on Hyprland: bind the shortcut in hyprland.conf, e.g. `{}` (`hyprctl globalshortcuts` \
+             lists Talkr's); hold it to dictate.",
+            line
+        ),
+        (true, Some(s), None) => format!("Wayland session: the shortcut is {}, bound by your desktop; change it in its keyboard settings.", s),
+        (true, None, None) => {
             "Wayland session: your desktop binds the shortcut (it may ask you to confirm it); change it in its keyboard \
              settings."
                 .to_string()
         }
-        (false, _) => "Wayland session without a global-shortcuts portal: bind the command `talkr --dictate` to a key in \
+        (false, _, _) => "Wayland session without a global-shortcuts portal: bind the command `talkr --dictate` to a key in \
                        your keyboard settings; it starts and stops dictation."
             .to_string(),
     };
@@ -130,7 +136,7 @@ mod tests {
     #[test]
     fn dictation_is_always_supported() {
         // The `talkr --dictate` fallback works even with no portal at all.
-        let none = capabilities(&Availability::default(), None);
+        let none = capabilities(&Availability::default(), None, None);
         assert!(none.supported);
         assert!(!none.hold_to_talk && !none.inserts_text);
         assert!(none.note.as_deref().unwrap().contains("talkr --dictate"));
@@ -139,7 +145,7 @@ mod tests {
 
     #[test]
     fn the_portals_decide_the_capabilities() {
-        let all = capabilities(&EVERYTHING, Some("Ctrl + Super + Space"));
+        let all = capabilities(&EVERYTHING, Some("Ctrl + Super + Space"), None);
         assert!(all.supported && all.hold_to_talk && all.inserts_text);
         assert!(!all.modifier_only && !all.records_shortcut && !all.verifies_insertion);
         assert_eq!(all.os, "linux");
@@ -148,16 +154,26 @@ mod tests {
         assert!(note.contains("Ctrl + Super + Space"), "{}", note);
         assert!(!note.contains("--dictate"));
 
-        let shortcuts_only = capabilities(&Availability { shortcuts: true, ..Availability::default() }, None);
+        let shortcuts_only = capabilities(&Availability { shortcuts: true, ..Availability::default() }, None, None);
         assert!(shortcuts_only.hold_to_talk && !shortcuts_only.inserts_text);
         assert!(shortcuts_only.note.unwrap().contains("confirm"));
 
-        let typing_only = capabilities(&Availability { keyboard: true, ..Availability::default() }, None);
+        let typing_only = capabilities(&Availability { keyboard: true, ..Availability::default() }, None, None);
         assert!(!typing_only.hold_to_talk && typing_only.inserts_text);
 
-        let copy_only = capabilities(&Availability { data_control: true, ..Availability::default() }, None);
+        let copy_only = capabilities(&Availability { data_control: true, ..Availability::default() }, None, None);
         assert!(!copy_only.inserts_text);
         assert!(copy_only.note.unwrap().contains("copied"));
+    }
+
+    #[test]
+    fn hyprland_is_told_how_to_bind() {
+        let line = "bind = CTRL SUPER, space, global, app.talkr:dictate";
+        let note = capabilities(&EVERYTHING, Some("Ctrl + Super + Space"), Some(line)).note.unwrap();
+        assert!(note.contains(line) && note.contains("hyprland.conf"), "{}", note);
+        // Without the portal the line would bind nothing.
+        let note = capabilities(&Availability::default(), None, Some(line)).note.unwrap();
+        assert!(!note.contains(line) && note.contains("talkr --dictate"));
     }
 
     #[test]

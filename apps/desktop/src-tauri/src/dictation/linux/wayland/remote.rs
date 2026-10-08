@@ -234,32 +234,39 @@ pub fn last_error() -> Option<String> {
 /// The session, starting it when needed and waiting for it at most `wait`. Without
 /// `interactive` only a session the user allowed before is restored (no dialog expected).
 pub fn ensure(interactive: bool, wait: Duration) -> Option<Arc<Remote>> {
-    let mut slot = lock(&SLOT);
-    if let Some(remote) = &slot.active {
-        return Some(remote.clone());
-    }
-    if !slot.starting {
-        let token = load_token();
-        if !interactive && (token.is_none() || slot.restore_failed) {
-            return None;
-        }
-        let id = slot.next_id;
-        slot.next_id += 1;
-        slot.starting = true;
-        if !portal::spawn(start(token, id)) {
-            slot.starting = false;
-            return None;
-        }
-    }
     let deadline = Instant::now() + wait;
-    while slot.active.is_none() && slot.starting {
+    let mut slot = lock(&SLOT);
+    let mut started = false;
+    loop {
+        if let Some(remote) = &slot.active {
+            return Some(remote.clone());
+        }
+        if !slot.starting {
+            // Our own attempt ended without a session. (One that was already running, a silent
+            // restore, is followed by ours when the user asked.)
+            if started {
+                return None;
+            }
+            // A token that failed to restore would fail again: ask afresh.
+            let token = load_token().filter(|_| !slot.restore_failed);
+            if !interactive && token.is_none() {
+                return None;
+            }
+            let id = slot.next_id;
+            slot.next_id += 1;
+            slot.starting = true;
+            if !portal::spawn(start(token, id)) {
+                slot.starting = false;
+                return None;
+            }
+            started = true;
+        }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            break;
+            return None;
         }
         slot = CHANGED.wait_timeout(slot, left).unwrap_or_else(|e| e.into_inner()).0;
     }
-    slot.active.clone()
 }
 
 /// End the session (dictation was turned off). The restore token stays.

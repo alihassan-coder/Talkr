@@ -42,17 +42,29 @@ fn shortcut_note() -> Option<String> {
     let bound = shortcuts::report()
         .bound
         .into_iter()
-        .find(|(id, description)| id == "dictate" && !description.trim().is_empty())
+        .find(|(id, description)| id == shortcuts::DICTATE && !description.trim().is_empty())
         .map(|(_, description)| description);
     if bound.is_some() {
         return bound;
     }
     let requested = shortcuts::requested()?;
     Some(if requested.stand_in {
-        format!("{} (Wayland has no shortcuts of modifier keys alone, so Talkr asked for Space with them)", requested.label)
+        format!("{} (desktop shortcuts need a regular key, so Talkr asked for Space)", requested.label)
     } else {
         requested.label
     })
+}
+
+/// Hyprland binds an app's shortcuts only from its config: the line to add there.
+fn hyprland_line() -> Option<String> {
+    let hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        || std::env::var("XDG_CURRENT_DESKTOP")
+            .is_ok_and(|d| d.split(':').any(|name| name.eq_ignore_ascii_case("hyprland")));
+    if !hyprland {
+        return None;
+    }
+    let requested = shortcuts::requested()?;
+    Some(trigger::hyprland_bind(&requested, portal::APP_ID, shortcuts::DICTATE))
 }
 
 impl Backend for Os {
@@ -60,7 +72,14 @@ impl Backend for Os {
 
     fn capabilities() -> Capabilities {
         let av = portal::availability();
-        plan::capabilities(&av, shortcut_note().as_deref().filter(|_| av.shortcuts))
+        let mut caps = plan::capabilities(&av, shortcut_note().as_deref().filter(|_| av.shortcuts), hyprland_line().as_deref());
+        // The session binds after `start_hotkeys` returned, so its failure is only known here.
+        if let Some(error) = shortcuts::report().error.filter(|_| av.shortcuts && !shortcuts::running()) {
+            if let Some(note) = caps.note.as_mut() {
+                note.push_str(&format!(" The shortcut is not working: {}.", error));
+            }
+        }
+        caps
     }
 
     fn permission() -> Permission {
@@ -88,7 +107,7 @@ impl Backend for Os {
     }
 
     fn start_hotkeys(events: flume::Sender<HotkeyEvent>) -> Result<(), String> {
-        let av = portal::availability();
+        let av = portal::settled_availability();
         if av.keyboard {
             // Bring back keyboard access allowed in an earlier run, before the first dictation.
             remote::ensure(false, Duration::ZERO);

@@ -57,6 +57,15 @@ pub fn trigger(shortcut: &Shortcut) -> Trigger {
     Trigger { spec: spec.join("+"), label: label.join(" + "), stand_in }
 }
 
+/// The line that binds `trigger` in hyprland.conf. Hyprland ignores the suggested trigger: an
+/// app's shortcut does nothing until the user binds it there, by `app_id:shortcut_id`.
+pub fn hyprland_bind(trigger: &Trigger, app_id: &str, shortcut_id: &str) -> String {
+    let mut parts: Vec<&str> = trigger.spec.split('+').collect();
+    let key = parts.pop().unwrap_or("space");
+    let mods: Vec<&str> = parts.into_iter().map(|m| if m == "LOGO" { "SUPER" } else { m }).collect();
+    format!("bind = {}, {}, global, {}:{}", mods.join(" "), key, app_id, shortcut_id)
+}
+
 /// The XKB key name of a Windows virtual-key code, and how to show it.
 pub fn key_name(vk: u16) -> Option<(String, String)> {
     let one = |c: u8| Some(((c as char).to_string(), (c as char).to_ascii_uppercase().to_string()));
@@ -175,6 +184,13 @@ mod tests {
         assert_eq!(t.spec, FALLBACK);
         assert!(t.stand_in);
         assert_eq!(trigger(&shortcut(false, false, false, false, None)).spec, FALLBACK);
+    }
+
+    #[test]
+    fn hyprland_gets_a_config_line() {
+        let bind = |s: &Shortcut| hyprland_bind(&trigger(s), "app.talkr", "dictate");
+        assert_eq!(bind(&Shortcut::ctrl_win()), "bind = CTRL SUPER, space, global, app.talkr:dictate");
+        assert_eq!(bind(&shortcut(false, false, false, false, Some(0x78))), "bind = , F9, global, app.talkr:dictate");
     }
 
     #[test]

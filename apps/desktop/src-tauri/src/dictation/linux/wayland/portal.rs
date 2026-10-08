@@ -15,7 +15,7 @@ use super::plan::Availability;
 
 /// The desktop file name Talkr is installed under (tauri.conf.json `identifier`): portals that
 /// remember a decision per app (shortcuts, keyboard access) need to know which app is asking.
-const APP_ID: &str = "app.talkr";
+pub const APP_ID: &str = "app.talkr";
 
 /// How long one probe of the portals may take. D-Bus starts xdg-desktop-portal on demand, which
 /// can take a few seconds right after login.
@@ -94,6 +94,17 @@ static PROBED: Condvar = Condvar::new();
 /// What this desktop offers. The first call waits briefly for the probe; later calls answer
 /// from the cache (re-checking in the background when something was missing).
 pub fn availability() -> Availability {
+    availability_within(FIRST_WAIT)
+}
+
+/// Like `availability`, waiting up to the whole probe for the first answer: for decisions that
+/// are not revisited (starting the shortcut listener), where "not probed yet" must not read as
+/// "missing".
+pub fn settled_availability() -> Availability {
+    availability_within(PROBE_TIMEOUT + Duration::from_secs(1))
+}
+
+fn availability_within(first_wait: Duration) -> Availability {
     let mut probe = lock(&PROBE);
     let stale = match (probe.result, probe.checked) {
         (Some(av), Some(at)) => !complete(&av) && at.elapsed() >= RECHECK,
@@ -113,7 +124,7 @@ pub fn availability() -> Availability {
             probe.running = false;
         }
     }
-    let deadline = Instant::now() + FIRST_WAIT;
+    let deadline = Instant::now() + first_wait;
     while probe.result.is_none() && probe.running {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {

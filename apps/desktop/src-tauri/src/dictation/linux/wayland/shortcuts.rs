@@ -17,7 +17,7 @@ use super::trigger::{trigger, Trigger};
 use crate::dictation::settings::Shortcut;
 use crate::dictation::HotkeyEvent;
 
-const DICTATE: &str = "dictate";
+pub const DICTATE: &str = "dictate";
 const PASTE_LAST: &str = "paste-last";
 
 /// Which bound shortcuts are held right now (bit 0: dictate, bit 1: paste-last).
@@ -169,6 +169,8 @@ fn sync(state: &mut State) {
         HELD.store(0, Ordering::SeqCst);
     }
     if !desired {
+        // An old session's failure says nothing about the next one.
+        state.report = None;
         return;
     }
     let Some(events) = state.events.clone() else { return };
@@ -292,33 +294,57 @@ async fn stopped(commands: &mut mpsc::UnboundedReceiver<Command>) {
 }
 
 /// Turns the portal's Activated and Deactivated into the engine's events.
+///
+/// A desktop that never reports releases (Deactivated is optional in the portal) cannot do
+/// hold-to-talk. That shows when the shortcut is pressed again while still "held": that press
+/// ends the dictation, and later presses are taps (start and lock, then stop), so the shortcut
+/// starts and stops dictation instead of restarting it on every press.
 #[derive(Debug, Default)]
 struct Presses {
     dictate_down: bool,
+    /// A release was reported in this session.
+    releases: bool,
+    /// Releases are not reported here.
+    no_releases: bool,
 }
 
 impl Presses {
     fn activated(&mut self, id: &str) -> Vec<HotkeyEvent> {
-        HELD.fetch_or(bit(id), Ordering::SeqCst);
-        match id {
-            DICTATE => {
-                let mut out = Vec::new();
-                if self.dictate_down {
-                    // The release never came: end that press first, as the keyboard would have.
-                    out.push(HotkeyEvent::DictateUp);
-                }
-                self.dictate_down = true;
-                out.push(HotkeyEvent::DictateDown);
-                out
-            }
-            PASTE_LAST => vec![HotkeyEvent::PasteLast],
-            _ => Vec::new(),
+        if id != DICTATE {
+            HELD.fetch_or(bit(id), Ordering::SeqCst);
+            return if id == PASTE_LAST { vec![HotkeyEvent::PasteLast] } else { Vec::new() };
         }
+        if self.no_releases {
+            return vec![HotkeyEvent::DictateDown, HotkeyEvent::DictateUp];
+        }
+        if std::mem::take(&mut self.dictate_down) {
+            if self.releases {
+                // One release went missing: end that press first, as the keyboard would have.
+                self.dictate_down = true;
+                return vec![HotkeyEvent::DictateUp, HotkeyEvent::DictateDown];
+            }
+            log::info!("dictation: the desktop does not report the shortcut's release; it starts and stops dictation");
+            self.no_releases = true;
+            HELD.fetch_and(!bit(id), Ordering::SeqCst);
+            return vec![HotkeyEvent::DictateUp];
+        }
+        HELD.fetch_or(bit(id), Ordering::SeqCst);
+        self.dictate_down = true;
+        vec![HotkeyEvent::DictateDown]
     }
 
     fn deactivated(&mut self, id: &str) -> Vec<HotkeyEvent> {
         HELD.fetch_and(!bit(id), Ordering::SeqCst);
-        if id == DICTATE && std::mem::take(&mut self.dictate_down) {
+        if id != DICTATE {
+            return Vec::new();
+        }
+        self.releases = true;
+        if self.no_releases {
+            // Releases do come after all: back to hold-to-talk from the next press.
+            self.no_releases = false;
+            return Vec::new();
+        }
+        if std::mem::take(&mut self.dictate_down) {
             vec![HotkeyEvent::DictateUp]
         } else {
             Vec::new()
@@ -343,7 +369,24 @@ mod tests {
     fn a_lost_release_is_made_up() {
         let mut p = Presses::default();
         p.activated(DICTATE);
+        p.deactivated(DICTATE);
+        p.activated(DICTATE);
         assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateUp, HotkeyEvent::DictateDown]);
+        assert_eq!(p.deactivated(DICTATE), vec![HotkeyEvent::DictateUp]);
+    }
+
+    #[test]
+    fn without_releases_presses_start_and_stop() {
+        let mut p = Presses::default();
+        assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateDown]);
+        // Pressed again, never released: this press ends the dictation, and does not start one.
+        assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateUp]);
+        // From now on each press is a tap (the engine locks a tapped dictation, then stops it).
+        assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateDown, HotkeyEvent::DictateUp]);
+        assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateDown, HotkeyEvent::DictateUp]);
+        // A release after all: hold-to-talk again.
+        assert!(p.deactivated(DICTATE).is_empty());
+        assert_eq!(p.activated(DICTATE), vec![HotkeyEvent::DictateDown]);
         assert_eq!(p.deactivated(DICTATE), vec![HotkeyEvent::DictateUp]);
     }
 
