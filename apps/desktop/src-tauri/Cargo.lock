@@ -5037,7 +5037,7 @@ dependencies = [
 
 [[package]]
 name = "talkr"
-version = "0.1.8-1"
+version = "0.1.8-2"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -5087,7 +5087,7 @@ dependencies = [
 
 [[package]]
 name = "talkr-engine"
-version = "0.1.8-1"
+version = "0.1.8-2"
 dependencies = [
  "hound",
  "log",
@@ -5104,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "talkr-protocol"
-version = "0.1.8-1"
+version = "0.1.8-2"
 dependencies = [
  "serde",
  "serde_json",

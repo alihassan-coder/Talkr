@@ -6,6 +6,35 @@ the "What's new" text installed copies show when they offer the update
 
 When releasing, rename **Unreleased** to the new version, e.g. `## 0.1.6 - 2026-10-08`.
 
+## 0.1.8-2 - 2026-10-08
+
+Beta 2: dictation on macOS and Linux, and a new look. Installed copies are not offered it as an
+update.
+
+### New
+- **Dictation on macOS**: hold ⌃⌘ in any app (Talkr asks for Accessibility once). The pill shows
+  over full-screen apps, text is pasted and checked, and remote desktops get real key presses.
+- **Dictation on Linux, X11**: Talkr listens only for your shortcut (never other typing), pastes
+  into the focused app (terminals included), and leaves your window manager's own shortcuts
+  working.
+- **Dictation on Linux, Wayland**: through the desktop's own portals (GNOME 48+, KDE Plasma 6,
+  Hyprland): the desktop asks once for the shortcut and for keyboard access. Elsewhere, bind
+  `talkr --dictate` to a key.
+- A redesigned **Dictation** page: live status, guided setup, a pill preview, your system's own
+  key names, and permission prompts that clear themselves.
+- A redesigned **Appearance** section with a live preview of each theme before you pick it.
+- The keys you press show live while you record a new shortcut.
+
+### Fixed
+- No more "vulkan-1.dll was not found" dialog on PCs without a Vulkan driver: Talkr goes
+  straight to the CPU.
+- Hold-to-talk with a key shortcut (like Ctrl + Alt + F8) no longer stops on its own.
+- Closing the window quits Talkr when it is not kept in the tray, and opening Talkr again always
+  shows the window.
+- Ctrl + Win + Left (switching desktops) no longer starts a recording in press-twice mode.
+- Short holds are timed from the key press, so they are not mistaken for taps.
+- A shortcut another program already uses is named on the Dictation page.
+
 ## 0.1.8-1 - 2026-10-07
 
 Beta: a pre-release for testing dictation. Installed copies are not offered it as an update.
