@@ -61,6 +61,7 @@ pub const FIELD_SOURCE_USER_DATA: u32 = 42;
 // CGEventSourceStateID
 pub const STATE_PRIVATE: i32 = -1;
 pub const STATE_COMBINED_SESSION: i32 = 0;
+pub const STATE_HID_SYSTEM: i32 = 1;
 // AXValueType
 pub const AX_VALUE_CGPOINT: u32 = 1;
 pub const AX_VALUE_CGSIZE: u32 = 2;

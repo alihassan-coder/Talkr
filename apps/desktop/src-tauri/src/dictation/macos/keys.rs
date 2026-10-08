@@ -140,10 +140,15 @@ fn held_flags() -> u64 {
     unsafe { ffi::CGEventSourceFlagsState(ffi::STATE_COMBINED_SESSION) }
 }
 
-/// Whether the Mac key `code` is held right now.
+/// Whether the Mac key `code` is held right now, by the keyboard (the hardware state, which an
+/// event tap cannot change) or by software posting keys. A key Talkr's tap keeps from the
+/// session does not show in the session's own state (seen on CI with posted keys), so the
+/// hardware state is asked too.
 pub fn key_held(code: u16) -> bool {
-    // SAFETY: plain query.
-    unsafe { ffi::CGEventSourceKeyState(ffi::STATE_COMBINED_SESSION, code) }
+    // SAFETY: plain queries.
+    unsafe {
+        ffi::CGEventSourceKeyState(ffi::STATE_HID_SYSTEM, code) || ffi::CGEventSourceKeyState(ffi::STATE_COMBINED_SESSION, code)
+    }
 }
 
 /// Whether every key of `shortcut` is held right now. `listener`: whether the listener saw its

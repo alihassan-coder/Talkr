@@ -418,8 +418,14 @@ mod tests {
         // `shortcut_held` asks the listener instead, so it does not depend on the answer.
         {
             use std::io::Write;
-            let system = keys::key_held(0x50);
-            let _ = writeln!(std::io::stderr(), "a swallowed key in the combined session key state: held = {system}");
+            // SAFETY: plain queries.
+            let (session, hid) = unsafe {
+                (
+                    ffi::CGEventSourceKeyState(ffi::STATE_COMBINED_SESSION, 0x50),
+                    ffi::CGEventSourceKeyState(ffi::STATE_HID_SYSTEM, 0x50),
+                )
+            };
+            let _ = writeln!(std::io::stderr(), "a swallowed (posted) key: combined session state {session}, HID state {hid}");
         }
         press(0x50, false);
         let released = rx.recv_timeout(Duration::from_secs(3)).ok();
