@@ -1,5 +1,5 @@
-//! The frontmost app, through NSWorkspace: who gets the text, and bringing them back to the front
-//! when focus moved during a dictation.
+//! The app with keyboard focus (through Accessibility, or NSWorkspace): who gets the text, and
+//! bringing them back to the front when focus moved during a dictation.
 
 use std::time::{Duration, Instant};
 use objc2::rc::autoreleasepool;
@@ -7,21 +7,32 @@ use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWork
 use super::ax;
 use super::target::Target;
 
-/// The app with keyboard focus right now.
+fn target(app: &NSRunningApplication) -> Target {
+    Target {
+        pid: app.processIdentifier(),
+        bundle_id: app.bundleIdentifier().map(|id| id.to_string()).unwrap_or_default(),
+        name: app.localizedName().map(|name| name.to_string()),
+    }
+}
+
+/// The app with keyboard focus right now: from Accessibility when allowed (always current),
+/// else NSWorkspace's frontmost app.
 pub fn snapshot() -> Option<Target> {
     autoreleasepool(|_| {
-        let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-        Some(Target {
-            pid: app.processIdentifier(),
-            bundle_id: app.bundleIdentifier().map(|id| id.to_string()).unwrap_or_default(),
-            name: app.localizedName().map(|name| name.to_string()),
-        })
+        if let Some(pid) = ax::focused_app_pid() {
+            return Some(match NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+                Some(app) => target(&app),
+                None => Target { pid, ..Target::default() },
+            });
+        }
+        NSWorkspace::sharedWorkspace().frontmostApplication().map(|app| target(&app))
     })
 }
 
-/// The process id of the frontmost app.
+/// The process id of the app with keyboard focus.
 pub fn frontmost_pid() -> Option<i32> {
-    autoreleasepool(|_| NSWorkspace::sharedWorkspace().frontmostApplication().map(|app| app.processIdentifier()))
+    ax::focused_app_pid()
+        .or_else(|| autoreleasepool(|_| NSWorkspace::sharedWorkspace().frontmostApplication().map(|app| app.processIdentifier())))
 }
 
 /// Whether the app is still running.

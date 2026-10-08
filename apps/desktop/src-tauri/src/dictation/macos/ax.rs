@@ -72,6 +72,20 @@ fn focused() -> Option<Cf> {
     attribute(&system()?.0, "AXFocusedUIElement")
 }
 
+/// The process of the app with keyboard focus, as Accessibility sees it. Unlike NSWorkspace's
+/// frontmost app (updated through notifications on the main thread's run loop) it is read fresh
+/// on every call, and it follows panels that take keys without activating their app (Spotlight).
+pub fn focused_app_pid() -> Option<i32> {
+    if !ffi::trusted() {
+        return None;
+    }
+    let app = attribute(&system()?.0, "AXFocusedApplication")?;
+    let mut pid = 0i32;
+    // SAFETY: valid element; writes one pid.
+    let error = unsafe { ffi::AXUIElementGetPid(app.as_ptr(), &mut pid) };
+    (error == AX_SUCCESS && pid > 0).then_some(pid)
+}
+
 /// Inspect the field with keyboard focus. `None` when nothing could be read (Accessibility not
 /// allowed, no focused element, an app that does not answer).
 pub fn inspect() -> Option<FieldInfo> {
